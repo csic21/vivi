@@ -1,4 +1,4 @@
-# GameVoice v0.2
+# GameVoice v0.2.1
 
 <img src="brand/icon-source.png" alt="GameVoice" width="96" height="96" />
 

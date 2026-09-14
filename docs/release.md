@@ -66,9 +66,15 @@ git tag signaling-v0.2.0 && git push origin signaling-v0.2.0
 - **客户端没提示更新**：先确认 Release 里有 `latest.json`；
   再确认 `pubkey` 已替换（占位符会导致签名校验失败，前端静默跳过，
   DEV 模式下控制台有 `[updater]` 日志）。
-- **macOS 提示“无法验证开发者”**：未做 Apple 公证的正常现象，
-  右键 → 打开 → 仍要打开；或 `xattr -cr /Applications/GameVoice.app`。
-  如需分发免警告，需 Apple Developer 账号做签名+公证（后续再加）。
+- **macOS 提示“已损坏，无法打开”或“无法验证开发者”**：
+  不是安装包坏了。当前没有 Apple 公证，Chrome/Safari 下载后会被 Gatekeeper 隔离；
+  Sequoia 把未公证的包显示成「已损坏」。把 App 拖进「应用程序」后在终端执行：
+  ```bash
+  codesign --force --deep --sign - /Applications/GameVoice.app
+  xattr -cr /Applications/GameVoice.app
+  open /Applications/GameVoice.app
+  ```
+  以后要双击直接开，需要 Apple Developer 账号做签名+公证。
 - **Intel Mac 用户**：当前只打 ARM64 包，Intel 机经 Rosetta 2 可运行；
   有需求再加 `macos-13`（Intel）构建位。
 - **想先验证流水线不发版**：Actions 页手动 `workflow_dispatch`

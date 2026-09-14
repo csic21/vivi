@@ -30,5 +30,5 @@ export const ipc = {
   getPtt: () => invoke<PttState>("get_ptt"),
   setPttEnabled: (enabled: boolean) =>
     invoke<void>("set_ptt_enabled", { enabled }),
-  setPttKey: (key: string) => invoke<void>("set_ptt_key", { key }),
+  setPttKey: (key: string) => invoke<string>("set_ptt_key", { key }),
 };

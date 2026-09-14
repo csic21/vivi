@@ -8,9 +8,9 @@ export function levelToPct(level: number): number {
   return Math.round(Math.min(1, Math.max(0, (db + 60) / 60)) * 100);
 }
 
-/** 话筒亮起门限：低于此视为环境底噪，避免麦标常闪。 */
+/** 话筒亮起门限：对齐 VAD release RMS，低于此视为环境底噪。 */
 export function levelIsHot(level: number): boolean {
-  return levelToPct(level) >= 12;
+  return level >= 0.012;
 }
 
 type Listener = (level: number, stale: boolean) => void;

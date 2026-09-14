@@ -32,6 +32,7 @@ export interface SessionStats {
   speaker_gain: number;
   ns_enabled: boolean;
   agc_enabled: boolean;
+  muted: boolean;
 }
 
 export interface MicTestReport {

@@ -1,6 +1,6 @@
 /* GameVoice squad comms HUD.
-   One memorable element: the amber presence rail on the speaking row.
-   Everything else stays quiet. Motion answers state changes only. */
+   One memorable element: the amber mic that lights when you speak.
+   Everything else stays quiet. Motion answers voice, not page load. */
 
 :root {
   --ink: #0e1420;
@@ -69,16 +69,16 @@ button {
 /* ---------- shell ---------- */
 
 .shell {
-  max-width: 600px;
+  max-width: 640px;
   margin: 0 auto;
-  padding: 28px 24px 32px;
+  padding: 24px 24px 32px;
   min-height: 100vh;
 }
 
 /* ---------- home ---------- */
 
 .brand {
-  margin-top: 8vh;
+  margin-top: 4vh;
 }
 
 .brand h1 {
@@ -164,10 +164,10 @@ button {
 
 .devices {
   display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 10px;
   margin-top: 16px;
-  padding: 12px 14px;
+  padding: 12px 14px 14px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--panel);
@@ -179,14 +179,18 @@ button {
   padding: 0 6px;
 }
 
-.devices label {
+.device-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+}
+
+.device-row label,
+.devices label {
   color: var(--fog);
   font-size: 13px;
-  flex: 1;
-  min-width: 200px;
+  width: 52px;
+  flex: none;
 }
 
 select {
@@ -196,6 +200,11 @@ select {
   border-radius: 8px;
   padding: 7px 9px;
   max-width: 100%;
+}
+
+.device-row select {
+  flex: 1;
+  min-width: 0;
 }
 
 .notice {
@@ -227,6 +236,13 @@ select {
 .roomhead h2 {
   font-size: 20px;
   font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.roomid {
+  overflow-wrap: anywhere;
 }
 
 .roomhead .self {
@@ -235,6 +251,21 @@ select {
   font-weight: 400;
   margin-top: 2px;
   display: block;
+}
+
+.btn-ghost {
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: transparent;
+}
+
+.btn-ghost svg {
+  width: 13px;
+  height: 13px;
 }
 
 .pills {
@@ -330,9 +361,32 @@ select {
   opacity: 1;
 }
 
+.avatar {
+  position: relative;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  color: var(--fog);
+  z-index: 1;
+  transition: border-color 160ms ease, color 160ms ease, background-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.avatar.lit {
+  border-color: var(--signal);
+  color: var(--signal);
+  background: var(--signal-dim);
+  box-shadow: 0 0 0 3px var(--signal-dim);
+}
+
 .member .who {
   min-width: 0;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
 }
 
 .member .name {
@@ -413,17 +467,27 @@ select {
   font-variant-numeric: tabular-nums;
 }
 
-.lamp {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: var(--line);
-  transition: background-color 160ms ease, opacity 160ms ease;
+.iconbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
 }
 
-.lamp.on {
-  background: var(--signal);
-  opacity: 1;
+.iconbtn svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+
+.iconbtn.lit {
+  border-color: rgba(255, 178, 36, 0.65);
+  color: var(--signal);
+  background: var(--signal-dim);
+}
+
+.btn-danger.iconbtn {
+  color: #ffb3b6;
 }
 
 /* ---------- settings ---------- */
@@ -465,11 +529,225 @@ select {
   width: 110px;
 }
 
-.settings .hint {
+.modes {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.modes .mode {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 8px 16px;
+  color: var(--fog);
+  font-weight: 600;
+  min-height: 36px;
+}
+
+.modes .mode + .mode {
+  border-left: 1px solid var(--line);
+}
+
+.modes .mode:hover:not(.on):not(:disabled) {
+  background: #212b3d;
+}
+
+.modes .mode.on {
+  background: var(--signal-dim);
+  color: var(--signal);
+}
+
+.bindkey {
+  min-width: 8.5em;
+  font-variant-numeric: tabular-nums;
+}
+
+.bindkey.capturing {
+  border-color: var(--signal);
+  color: var(--signal);
+}
+
+.hint {
   font-size: 12px;
   color: var(--fog);
   margin: 8px 0 0;
   max-width: 60ch;
+}
+
+.settings .mictest {
+  margin-top: 4px;
+  margin-bottom: 10px;
+}
+
+/* ---------- mic icon ---------- */
+
+.mic {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  color: var(--fog);
+  flex: none;
+  line-height: 0;
+}
+
+.mic.lit {
+  color: var(--signal);
+}
+
+.mic.muted {
+  color: #ffb3b6;
+}
+
+.mic-glow {
+  position: absolute;
+  inset: -10px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 178, 36, 0.55) 0%, transparent 70%);
+  opacity: 0;
+  transform: scale(0.55);
+  pointer-events: none;
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.mic.lit .mic-glow {
+  opacity: calc(0.28 + var(--lvl, 0) * 0.55);
+  transform: scale(calc(0.8 + var(--lvl, 0) * 0.45));
+}
+
+.mic.muted .mic-glow {
+  opacity: 0;
+}
+
+/* ---------- 试麦 ---------- */
+
+.mictest {
+  margin-top: 14px;
+  padding: 22px 18px 18px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 14px;
+}
+
+.mictest.compact {
+  flex-direction: row;
+  align-items: center;
+  text-align: left;
+  padding: 14px;
+  gap: 16px;
+}
+
+.mictest-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.mictest.compact .mictest-body {
+  align-items: flex-start;
+  flex: 1;
+}
+
+.mictest-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.mictest-status {
+  margin: 0;
+  color: var(--fog);
+  font-size: 13px;
+  max-width: 36ch;
+}
+
+.mictest .hint {
+  margin: 0;
+}
+
+.mictest .btn {
+  min-width: 8em;
+}
+
+.mictest-meter {
+  width: 160px;
+  height: 8px;
+}
+
+.mictest.compact .mictest-meter {
+  width: min(100%, 200px);
+}
+
+.orb {
+  position: relative;
+  width: 104px;
+  height: 104px;
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+
+.mictest.compact .orb {
+  width: 72px;
+  height: 72px;
+}
+
+.orb-core {
+  width: 68px;
+  height: 68px;
+  border-radius: 50%;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  display: grid;
+  place-items: center;
+  z-index: 1;
+  transition: border-color 160ms ease, background-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.mictest.compact .orb-core {
+  width: 52px;
+  height: 52px;
+}
+
+.orb.live .orb-core {
+  border-color: rgba(255, 178, 36, 0.55);
+}
+
+.orb.hot .orb-core {
+  border-color: var(--signal);
+  background: var(--signal-dim);
+  box-shadow: 0 0 0 4px var(--signal-dim), 0 0 22px rgba(255, 178, 36, 0.28);
+}
+
+.orb-ring,
+.orb-ring.late {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 178, 36, 0.35);
+  pointer-events: none;
+  opacity: 0;
+  transform: scale(0.7);
+  transition: opacity 80ms linear, transform 80ms linear;
+}
+
+.orb.live .orb-ring {
+  opacity: calc(0.22 + var(--lvl, 0) * 0.7);
+  transform: scale(calc(0.76 + var(--lvl, 0) * 0.36));
+}
+
+.orb.live .orb-ring.late {
+  opacity: calc(var(--lvl, 0) * 0.45);
+  transform: scale(calc(0.88 + var(--lvl, 0) * 0.42));
 }
 
 .check {
@@ -521,8 +799,17 @@ select {
 @media (prefers-reduced-motion: reduce) {
   .member::before,
   .rail,
-  .lamp,
-  .btn {
+  .btn,
+  .mic-glow,
+  .orb-core,
+  .orb-ring,
+  .avatar {
     transition: none;
+  }
+
+  .mic-glow,
+  .orb-ring,
+  .orb-ring.late {
+    transform: none;
   }
 }

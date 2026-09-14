@@ -3,10 +3,45 @@ import { useVoiceStore } from "../stores/useVoiceStore";
 import { useAudioDevices } from "../hooks/useAudioDevices";
 import { levelToPct, useMicLevel } from "../hooks/useMicLevel";
 import { ipc } from "../ipc";
+import { MicTest } from "./MicTest";
+
+function displayKey(key: string): string {
+  switch (key) {
+    case "Mouse4":
+      return "鼠标侧键4";
+    case "Mouse5":
+      return "鼠标侧键5";
+    case "Mouse3":
+      return "鼠标中键";
+    case "Grave":
+      return "`";
+    default:
+      return key;
+  }
+}
+
+function eventToBind(code: string): string | null {
+  if (code.startsWith("Key") && code.length === 4) return code.slice(3);
+  if (code.startsWith("Digit")) return code;
+  if (code.startsWith("Arrow")) return code.slice(5);
+  if (code === "Backquote") return "Grave";
+  if (code === "BracketLeft") return "LeftBracket";
+  if (code === "BracketRight") return "RightBracket";
+  if (code === "Backslash") return "BackSlash";
+  if (code === "Quote") return "Apostrophe";
+  if (code === "Period") return "Dot";
+  if (code === "AltLeft" || code === "AltRight") return "Alt";
+  if (code === "ControlLeft" || code === "ControlRight") return "Control";
+  if (code === "ShiftLeft" || code === "ShiftRight") return "Shift";
+  if (code === "MetaLeft" || code === "MetaRight" || code === "OSLeft" || code === "OSRight") {
+    return null;
+  }
+  return code;
+}
 
 /**
  * 设置：设备（房间内切换自动重进）+ 音频（试麦/麦音量/扬声器/降噪/增强）
- * + 按键说话（系统级热键，后端注册，只支持键盘）。
+ * + 输入模式（自由说话 / 按键说话）。按键说话由后端轮询 HID，不注册系统热键。
  */
 export function SettingsPanel() {
   const inputDevice = useVoiceStore((s) => s.inputDevice);
@@ -26,10 +61,9 @@ export function SettingsPanel() {
   const agcEnabled = useVoiceStore((s) => s.agcEnabled);
   const setAgcEnabled = useVoiceStore((s) => s.setAgcEnabled);
   const { devices } = useAudioDevices();
-  const [keyDraft, setKeyDraft] = useState(pttKey);
+  const [capturing, setCapturing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
-  const [listening, setListening] = useState(false);
 
   const inputs = devices.filter((d) => d.kind === "Input");
   const outputs = devices.filter((d) => d.kind === "Output");
@@ -46,13 +80,14 @@ export function SettingsPanel() {
   };
 
   const togglePtt = async (enabled: boolean) => {
+    if (enabled === pttEnabled) return;
     setBusy(true);
     setMsg(null);
     try {
       await ipc.setPttEnabled(enabled);
       const p = await ipc.getPtt();
       setPtt(p.enabled, p.key);
-      if (enabled) setMuted(true);
+      setMuted(enabled);
     } catch (e) {
       setMsg(`切换失败：${String(e)}`);
     } finally {
@@ -60,14 +95,14 @@ export function SettingsPanel() {
     }
   };
 
-  const applyKey = async () => {
+  const applyKey = async (raw: string) => {
     setBusy(true);
     setMsg(null);
+    setCapturing(false);
     try {
-      await ipc.setPttKey(keyDraft);
-      const p = await ipc.getPtt();
-      setPtt(p.enabled, p.key);
-      setMsg(`按键已设为 ${p.key}，全局生效，游戏全屏也能用。`);
+      const label = await ipc.setPttKey(raw);
+      setPtt(pttEnabled, label);
+      setMsg(`按键已设为 ${displayKey(label)}，游戏全屏也能用，不会抢走游戏里的这个键。`);
     } catch (e) {
       setMsg(`按键无效：${String(e)}`);
     } finally {
@@ -75,22 +110,6 @@ export function SettingsPanel() {
     }
   };
 
-  const toggleListen = async () => {
-    if (listening) {
-      await ipc.micLoopbackStop().catch(() => undefined);
-      setListening(false);
-      return;
-    }
-    setMsg(null);
-    try {
-      await ipc.micLoopbackStart({ input: inputDevice, output: outputDevice });
-      setListening(true);
-    } catch (e) {
-      setMsg(`试听失败：${String(e)}`);
-    }
-  };
-
-  // 米表：用 50ms 快通道（store 里的是 500ms 快照，太顿）
   const { level: fastLevel, stale: meterStale } = useMicLevel();
   const meterPct = levelToPct(fastLevel);
 
@@ -124,19 +143,8 @@ export function SettingsPanel() {
             </option>
           ))}
         </select>
-        <button
-          className={listening ? "btn btn-danger" : "btn"}
-          onClick={toggleListen}
-          title="实时从扬声器听到自己的麦克风（含降噪增益链路）"
-        >
-          {listening ? "停止试听" : "试听麦克风"}
-        </button>
       </div>
-      {listening && (
-        <p className="hint" role="status">
-          正在实时试听…请戴耳机，否则会啸叫。进房间会自动停止。
-        </p>
-      )}
+      <MicTest compact />
       <div className="row">
         <label htmlFor="mic-gain">麦克风音量 {Math.round(micGain * 100)}%</label>
         <input
@@ -163,11 +171,11 @@ export function SettingsPanel() {
             style={{ transform: `scaleX(${meterPct / 100})` }}
           />
         </span>
-        {meterStale && (
+        {meterStale ? (
           <span className="sub" role="status">
             电平无数据：重启 tauri dev
           </span>
-        )}
+        ) : null}
       </div>
       <div className="row">
         <label htmlFor="spk-gain">扬声器音量 {Math.round(speakerGain * 100)}%</label>
@@ -202,38 +210,72 @@ export function SettingsPanel() {
         </label>
       </div>
       <div className="row">
-        <label>
-          <input
-            className="check"
-            type="checkbox"
-            checked={pttEnabled}
+        <span id="talk-mode-label">输入模式</span>
+        <div className="modes" role="radiogroup" aria-labelledby="talk-mode-label">
+          <button
+            type="button"
+            role="radio"
+            className={pttEnabled ? "mode" : "mode on"}
+            aria-checked={!pttEnabled}
             disabled={busy}
-            onChange={(e) => void togglePtt(e.target.checked)}
-          />
-          按键说话
-        </label>
-        <label htmlFor="ptt-key">按键</label>
-        <input
-          id="ptt-key"
-          type="text"
-          value={keyDraft}
-          autoComplete="off"
-          spellCheck={false}
-          onChange={(e) => setKeyDraft(e.target.value)}
-          placeholder="V…"
-        />
-        <button className="btn" disabled={busy} onClick={applyKey}>
-          应用
-        </button>
+            onClick={() => void togglePtt(false)}
+          >
+            自由说话
+          </button>
+          <button
+            type="button"
+            role="radio"
+            className={pttEnabled ? "mode on" : "mode"}
+            aria-checked={pttEnabled}
+            disabled={busy}
+            onClick={() => void togglePtt(true)}
+          >
+            按键说话
+          </button>
+        </div>
       </div>
+      {pttEnabled ? (
+        <div className="row">
+          <label htmlFor="ptt-key">按键</label>
+          <button
+            id="ptt-key"
+            type="button"
+            className={capturing ? "btn bindkey capturing" : "btn bindkey"}
+            disabled={busy}
+            title="点一下，再按下要绑定的键"
+            onClick={() => setCapturing(true)}
+            onBlur={() => setCapturing(false)}
+            onKeyDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              if (e.repeat) return;
+              if (e.code === "Escape") {
+                setCapturing(false);
+                return;
+              }
+              const bind = eventToBind(e.code);
+              if (bind) void applyKey(bind);
+            }}
+            onMouseDown={(e) => {
+              if (!capturing || e.button < 3) return;
+              e.preventDefault();
+              void applyKey(`Mouse${e.button + 1}`);
+            }}
+          >
+            {capturing ? "按下要绑定的键…" : displayKey(pttKey)}
+          </button>
+        </div>
+      ) : null}
       <p className="hint">
-        按键说话由后端注册为系统热键，前端卡死不影响收发。只支持键盘按键，不支持鼠标侧键。
+        {pttEnabled
+          ? `按住 ${displayKey(pttKey)} 开麦，松开静音。全局生效，不会抢走游戏里的这个键。macOS 需在「辅助功能」里允许本应用。`
+          : "自由说话：开麦后一直能说话，点底部「静音」可关麦。"}
       </p>
-      {msg && (
+      {msg ? (
         <p className="hint" role="status" aria-live="polite">
           {msg}
         </p>
-      )}
+      ) : null}
     </section>
   );
 }

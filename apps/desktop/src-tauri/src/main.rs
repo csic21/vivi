@@ -1,14 +1,15 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-//! Tauri IPC 薄层 + 通话会话持有 + Rust 侧 PTT（系统级热键，不经过 JS）。
+//! Tauri IPC 薄层 + 通话会话持有 + Rust 侧 PTT（观察式按键，不经过 JS）。
 //!
-//! 原则重申：实时音频全在 voice-session；本层只做会话持有、IPC 转发、PTT 热键。
-//! PTT 回调跑在 backend（按键按下/松开直改静音），渲染进程卡死也不影响收发。
+//! 原则重申：实时音频全在 voice-session；本层只做会话持有、IPC 转发、PTT 监听。
+//! PTT 轮询跑在独立线程（按键按下/松开直改静音），渲染进程卡死也不影响收发。
+
+mod ptt;
 
 use std::sync::{Mutex, MutexGuard};
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager, State};
-use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
+use tauri::State;
 use voice_common::DeviceInfo;
 use voice_session::{AudioMode, Session, SessionConfig, SessionHandle, SessionStats};
 use voice_webrtc::PeerConfig;
@@ -21,6 +22,7 @@ struct AppState {
     loopback: Mutex<Option<voice_core::audio::LoopbackHandle>>,
     ptt_enabled: Mutex<bool>,
     ptt_key: Mutex<String>,
+    ptt_bind: Mutex<ptt::PttBind>,
     signaling_url: String,
     stun_urls: Vec<String>,
 }
@@ -220,77 +222,26 @@ fn get_ptt(state: State<'_, AppState>) -> PttState {
 }
 
 #[tauri::command]
-async fn set_ptt_enabled(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    enabled: bool,
-) -> Result<(), String> {
-    *lock(&state.ptt_enabled) = enabled;
+async fn set_ptt_enabled(state: State<'_, AppState>, enabled: bool) -> Result<(), String> {
     if enabled {
-        // 开启即注册当前键并静音等按键
-        let key = lock(&state.ptt_key).clone();
-        register_ptt_key(&app, "", &key)?;
-        let handle = lock(&state.session).clone();
-        if let Some(h) = handle {
-            h.set_muted(true).await;
-        }
+        ptt::ensure_input()?;
+    }
+    *lock(&state.ptt_enabled) = enabled;
+    let handle = lock(&state.session).clone();
+    if let Some(h) = handle {
+        // 按键说话：默认静音等按键；自由说话：开麦。
+        h.set_muted(enabled).await;
     }
     Ok(())
 }
 
 #[tauri::command]
-fn set_ptt_key(app: AppHandle, state: State<'_, AppState>, key: String) -> Result<(), String> {
-    let key = key.trim().to_owned();
-    if key.is_empty() {
-        return Err("empty shortcut".into());
-    }
-    // 先解析再换绑：新键非法则保留旧键
-    let new_sc: Shortcut = key.parse().map_err(|e| format!("bad shortcut: {e}"))?;
-    let old_key = lock(&state.ptt_key).clone();
-    if old_key != key {
-        if let Ok(old_sc) = old_key.parse::<Shortcut>() {
-            let _ = app.global_shortcut().unregister(old_sc);
-        }
-        app.global_shortcut()
-            .on_shortcut(new_sc, ptt_handler)
-            .map_err(|e| e.to_string())?;
-        *lock(&state.ptt_key) = key;
-    }
-    Ok(())
-}
-
-/// PTT 按键回调（backend 线程）：按下开麦，松开静音；非 PTT 模式/无会话直接忽略。
-/// 不经过 JS，UI 卡死也不影响。
-fn ptt_handler(
-    app: &AppHandle,
-    _shortcut: &Shortcut,
-    event: tauri_plugin_global_shortcut::ShortcutEvent,
-) {
-    let Some(state) = app.try_state::<AppState>() else {
-        return;
-    };
-    if !*lock(&state.ptt_enabled) {
-        return;
-    }
-    let handle = lock(&state.session).clone();
-    let Some(h) = handle else { return };
-    match event.state {
-        ShortcutState::Pressed => h.set_muted_blocking(false),
-        ShortcutState::Released => h.set_muted_blocking(true),
-    }
-}
-
-/// 注册 PTT 键（`old_key` 为空表示首次注册，不解绑）。
-fn register_ptt_key(app: &AppHandle, old_key: &str, new_key: &str) -> Result<(), String> {
-    if !old_key.is_empty() {
-        if let Ok(old_sc) = old_key.parse::<Shortcut>() {
-            let _ = app.global_shortcut().unregister(old_sc);
-        }
-    }
-    let sc: Shortcut = new_key.parse().map_err(|e| format!("bad shortcut: {e}"))?;
-    app.global_shortcut()
-        .on_shortcut(sc, ptt_handler)
-        .map_err(|e| e.to_string())
+fn set_ptt_key(state: State<'_, AppState>, key: String) -> Result<String, String> {
+    let bind = ptt::parse_bind(&key)?;
+    let label = bind.label();
+    *lock(&state.ptt_bind) = bind;
+    *lock(&state.ptt_key) = label.clone();
+    Ok(label)
 }
 
 fn main() {
@@ -320,10 +271,12 @@ fn main() {
             loopback: Mutex::new(None),
             ptt_enabled: Mutex::new(false),
             ptt_key: Mutex::new(DEFAULT_PTT_KEY.into()),
+            ptt_bind: Mutex::new(ptt::PttBind::default_v()),
             signaling_url,
             stun_urls,
         })
-        .setup(|_app| {
+        .setup(|app| {
+            ptt::spawn(app.handle().clone());
             // 内嵌信令：本机 8080 有.room/WS/TURN 凭证全套，开箱即用；
             // 端口被占（比如手动跑了 signaling）就让路，用现成的。
             tauri::async_runtime::spawn(async {
@@ -340,7 +293,6 @@ fn main() {
             });
             Ok(())
         })
-        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![

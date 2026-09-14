@@ -5,6 +5,7 @@ import { MemberList } from "../components/MemberList";
 import { ControlsBar } from "../components/ControlsBar";
 import { StatsBar } from "../components/StatsBar";
 import { SettingsPanel } from "../components/SettingsPanel";
+import { CopyIcon } from "../components/icons";
 
 export function RoomPage({
   roomId,
@@ -62,28 +63,31 @@ export function RoomPage({
   return (
     <main className="shell">
       <header className="roomhead">
-        <h2>
-          {roomId}{" "}
-          <button
-            className="btn"
-            style={{ padding: "2px 10px", fontSize: 12 }}
-            onClick={copyRoom}
-            title="复制房间号发给队友"
-          >
-            {copied ? "已复制✓" : "复制"}
-          </button>
+        <div>
+          <h2>
+            <span className="roomid">{roomId}</span>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => void copyRoom()}
+              title="复制房间号发给队友"
+            >
+              <CopyIcon />
+              {copied ? "已复制" : "复制"}
+            </button>
+          </h2>
           <span className="self">你在 {userId ?? "连接中"} 号位</span>
-        </h2>
+        </div>
         <StatsBar />
       </header>
-      {error && (
+      {error ? (
         <p className="notice notice-error" role="alert" aria-live="polite">
           {error}
         </p>
-      )}
+      ) : null}
       <MemberList />
-      <ControlsBar onLeave={quit} />
-      {showSettings && <SettingsPanel />}
+      <ControlsBar onLeave={() => void quit()} />
+      {showSettings ? <SettingsPanel /> : null}
     </main>
   );
 }

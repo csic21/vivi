@@ -3,6 +3,7 @@ import { useVoiceStore } from "../stores/useVoiceStore";
 import { useAudioDevices } from "../hooks/useAudioDevices";
 import { createRoom } from "../api/signaling";
 import { ipc } from "../ipc";
+import { MicTest } from "../components/MicTest";
 
 export function HomePage({ onJoin }: { onJoin: (roomId: string) => void }) {
   const [input, setInput] = useState("");
@@ -31,19 +32,19 @@ export function HomePage({ onJoin }: { onJoin: (roomId: string) => void }) {
   }, [devices]);
 
   useEffect(() => {
-    // 启动时把记住的偏好推给后端（热键注册不跨进程，必须重建）
+    // 启动时把记住的偏好推给后端（PTT 监听随进程，必须重建）
     void ipc.getPtt().then((p) => {
       const st = useVoiceStore.getState();
-      if (st.pttEnabled) {
-        void ipc
-          .setPttEnabled(true)
-          .then(() => ipc.setPttKey(st.pttKey))
-          .then(() => ipc.getPtt())
-          .then((fresh) => st.setPtt(fresh.enabled, fresh.key))
-          .catch(() => st.setPtt(p.enabled, p.key));
-      } else {
-        st.setPtt(p.enabled, p.key);
-      }
+      const key = st.pttKey || p.key;
+      void ipc
+        .setPttKey(key)
+        .then((label) => {
+          if (st.pttEnabled) {
+            return ipc.setPttEnabled(true).then(() => st.setPtt(true, label));
+          }
+          st.setPtt(false, label);
+        })
+        .catch(() => st.setPtt(p.enabled, p.key));
     });
   }, []);
 
@@ -70,7 +71,7 @@ export function HomePage({ onJoin }: { onJoin: (roomId: string) => void }) {
         <h1>
           GameVoice<span className="dot">.</span>
         </h1>
-        <p>小队语音，快、轻、稳定。输 Room ID 进房，或开一个新房间。</p>
+        <p>小队语音，快、轻、稳定。先试麦，再进房。</p>
       </div>
       <div className="joinrow">
         <input
@@ -79,54 +80,65 @@ export function HomePage({ onJoin }: { onJoin: (roomId: string) => void }) {
           aria-label="房间 ID"
           autoComplete="off"
           spellCheck={false}
+          autoFocus
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter") go(input);
           }}
-          placeholder="Room ID，比如 a1b2c3d4…"
+          placeholder="输入房间号"
         />
-        <button className="btn btn-primary" disabled={busy || !input.trim()} onClick={() => go(input)}>
+        <button
+          type="button"
+          className="btn btn-primary"
+          disabled={busy || !input.trim()}
+          onClick={() => go(input)}
+        >
           {busy ? "加入中…" : "加入"}
         </button>
-        <button className="btn" disabled={busy} onClick={create}>
+        <button type="button" className="btn" disabled={busy} onClick={() => void create()}>
           建房
         </button>
       </div>
       <fieldset className="devices">
         <legend>音频设备</legend>
-        <label htmlFor="mic">麦克风</label>
-        <select
-          id="mic"
-          value={inputDevice ?? ""}
-          onChange={(e) => setDevices(e.target.value || null, outputDevice)}
-        >
-          <option value="">默认设备</option>
-          {inputs.map((d) => (
-            <option key={d.id} value={d.name}>
-              {d.name}
-            </option>
-          ))}
-        </select>
-        <label htmlFor="spk">扬声器</label>
-        <select
-          id="spk"
-          value={outputDevice ?? ""}
-          onChange={(e) => setDevices(inputDevice, e.target.value || null)}
-        >
-          <option value="">默认设备</option>
-          {outputs.map((d) => (
-            <option key={d.id} value={d.name}>
-              {d.name}
-            </option>
-          ))}
-        </select>
+        <div className="device-row">
+          <label htmlFor="mic">麦克风</label>
+          <select
+            id="mic"
+            value={inputDevice ?? ""}
+            onChange={(e) => setDevices(e.target.value || null, outputDevice)}
+          >
+            <option value="">默认设备</option>
+            {inputs.map((d) => (
+              <option key={d.id} value={d.name}>
+                {d.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="device-row">
+          <label htmlFor="spk">扬声器</label>
+          <select
+            id="spk"
+            value={outputDevice ?? ""}
+            onChange={(e) => setDevices(inputDevice, e.target.value || null)}
+          >
+            <option value="">默认设备</option>
+            {outputs.map((d) => (
+              <option key={d.id} value={d.name}>
+                {d.name}
+              </option>
+            ))}
+          </select>
+        </div>
       </fieldset>
-      {error && (
+      <MicTest />
+      {error ? (
         <p className="notice notice-error" role="alert" aria-live="polite">
           {error}
         </p>
-      )}
+      ) : null}
     </main>
   );
 }

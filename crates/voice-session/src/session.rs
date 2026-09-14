@@ -1406,6 +1406,7 @@ impl CallMain {
             speaker_gain: self.audio_io.speaker_gain(),
             ns_enabled: self.audio_io.ns_on.load(Ordering::Relaxed),
             agc_enabled: self.audio_io.agc_on.load(Ordering::Relaxed),
+            muted: self.muted.load(Ordering::Relaxed),
         };
     }
 }

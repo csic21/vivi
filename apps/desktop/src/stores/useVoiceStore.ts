@@ -20,6 +20,7 @@ interface VoiceState {
   deafened: boolean;
   pttEnabled: boolean;
   pttKey: string;
+  pttHeld: boolean;
   inputDevice: string | null;
   outputDevice: string | null;
   showSettings: boolean;
@@ -61,7 +62,13 @@ async function doJoin(
       output: outputDevice,
       turn,
     });
-    set({ userId, busy: false, listening: false });
+    set({
+      userId,
+      busy: false,
+      listening: false,
+      muted: get().pttEnabled,
+      pttHeld: false,
+    });
   } catch (e) {
     set({ busy: false, error: friendlyError(String(e)) });
     throw e;
@@ -106,6 +113,7 @@ export const useVoiceStore = create<VoiceState>()(
   deafened: false,
   pttEnabled: false,
   pttKey: "V",
+  pttHeld: false,
   inputDevice: null,
   outputDevice: null,
   showSettings: false,
@@ -121,7 +129,8 @@ export const useVoiceStore = create<VoiceState>()(
     set({ deafened });
     void ipc.setDeafened(deafened);
   },
-  setPtt: (pttEnabled, pttKey) => set({ pttEnabled, pttKey }),
+  setPtt: (pttEnabled, pttKey) =>
+    set({ pttEnabled, pttKey, pttHeld: pttEnabled ? get().pttHeld : false }),
   setDevices: (inputDevice, outputDevice) => set({ inputDevice, outputDevice }),
   setShowSettings: (showSettings) => set({ showSettings }),
   setMicGain: (micGain) => {
@@ -144,6 +153,7 @@ export const useVoiceStore = create<VoiceState>()(
   applyStats: () => {
     void ipc.getStats().then((s) => {
       if (!s) return;
+      const st = get();
       set({
         members: s.peers,
         speakingSelf: s.speaking_self,
@@ -152,6 +162,7 @@ export const useVoiceStore = create<VoiceState>()(
         speakerGain: s.speaker_gain,
         nsEnabled: s.ns_enabled,
         agcEnabled: s.agc_enabled,
+        muted: st.pttEnabled ? !st.pttHeld : s.muted,
       });
     });
   },
@@ -176,6 +187,8 @@ export const useVoiceStore = create<VoiceState>()(
       members: [],
       speakingSelf: false,
       listening: false,
+      muted: false,
+      pttHeld: false,
     });
   },
   rejoin: async () => {

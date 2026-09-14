@@ -1,3 +1,6 @@
+import type { CSSProperties } from "react";
+import { levelToPct } from "../hooks/useMicLevel";
+
 function cx(...xs: Array<string | false | null | undefined>) {
   return xs.filter(Boolean).join(" ");
 }
@@ -14,11 +17,17 @@ export function MicIcon({
   level?: number;
   size?: number;
 }) {
-  const glow = Math.min(1, Math.max(0, level));
+  const glow = levelToPct(level) / 100;
   return (
     <span
       className={cx("mic", lit && "lit", muted && "muted")}
-      style={{ width: size, height: size, ["--lvl" as string]: String(glow) }}
+      style={
+        {
+          width: size,
+          height: size,
+          ["--lvl"]: String(glow),
+        } as CSSProperties
+      }
       aria-hidden="true"
     >
       <span className="mic-glow" />
@@ -83,8 +92,8 @@ export function GearIcon() {
       strokeLinejoin="round"
       aria-hidden="true"
     >
-      <circle cx="12" cy="12" r="3" />
-      <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9c.3.7.9 1.2 1.5 1.2H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" />
+      <path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3" />
+      <path d="M2 14h4M10 8h4M18 16h4" />
     </svg>
   );
 }

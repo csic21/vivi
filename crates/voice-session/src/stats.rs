@@ -36,4 +36,6 @@ pub struct SessionStats {
     pub speaker_gain: f32,
     pub ns_enabled: bool,
     pub agc_enabled: bool,
+    /// 本端是否静音（PTT 松开/自由说话点静音都走这里）。
+    pub muted: bool,
 }

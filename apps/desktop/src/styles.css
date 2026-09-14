@@ -85,6 +85,16 @@ button {
   font-size: 34px;
   font-weight: 750;
   letter-spacing: -0.01em;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand-mark {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  flex: none;
 }
 
 .brand h1 .dot {

@@ -1,4 +1,6 @@
-# GameVoice v0.1
+# GameVoice v0.2
+
+<img src="brand/icon-source.png" alt="GameVoice" width="96" height="96" />
 
 [![CI](https://github.com/csic21/vivi/actions/workflows/ci.yml/badge.svg)](https://github.com/csic21/vivi/actions/workflows/ci.yml)
 [![Release Desktop](https://github.com/csic21/vivi/actions/workflows/release-desktop.yml/badge.svg)](https://github.com/csic21/vivi/actions/workflows/release-desktop.yml)

@@ -69,6 +69,7 @@ export function HomePage({ onJoin }: { onJoin: (roomId: string) => void }) {
     <main className="shell">
       <div className="brand">
         <h1>
+          <img className="brand-mark" src="/icon.png" alt="" width={40} height={40} />
           GameVoice<span className="dot">.</span>
         </h1>
         <p>小队语音，快、轻、稳定。先试麦，再进房。</p>

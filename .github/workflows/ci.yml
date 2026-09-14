@@ -27,6 +27,10 @@ jobs:
       matrix:
         os: [ubuntu-22.04, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    # RUSTUP_TOOLCHAIN 优先级高于根目录 rust-toolchain.toml（stable），
+    # 强制 CI 用 MSRV 检查，避免 stable 新 clippy lint 误伤 -D warnings
+    env:
+      RUSTUP_TOOLCHAIN: "1.85"
     steps:
       - uses: actions/checkout@v4
       - name: Install Linux audio deps (cpal/ALSA)

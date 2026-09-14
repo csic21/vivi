@@ -28,9 +28,9 @@ jobs:
         os: [ubuntu-22.04, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     # RUSTUP_TOOLCHAIN 优先级高于根目录 rust-toolchain.toml（stable），
-    # 强制 CI 用 MSRV 检查，避免 stable 新 clippy lint 误伤 -D warnings
+    # 强制 CI 用钉死的工具链，避免 stable 新 clippy lint 误伤 -D warnings
     env:
-      RUSTUP_TOOLCHAIN: "1.85"
+      RUSTUP_TOOLCHAIN: "1.88"
     steps:
       - uses: actions/checkout@v4
       - name: Install Linux audio deps (cpal/ALSA)
@@ -40,9 +40,10 @@ jobs:
           sudo apt-get install -y libasound2-dev pkg-config build-essential
       - uses: dtolnay/rust-toolchain@stable
         with:
-          # 钉到 MSRV：stable 的新 clippy lint 会导致 -D warnings 误伤（如 chunks_exact_to_as_chunks），
-          # 且与 Cargo.toml 里 rust-version = "1.85" 的契约保持一致
-          toolchain: "1.85"
+          # 钉死工具链：-D warnings 下任何新 clippy lint 都会红，
+          # 钉住后 lint 集合冻结，升级即有意的 bump。
+          # 1.88 是下限：as_chunks 需要 1.88，icu_* 依赖也要求 1.88+。
+          toolchain: "1.88"
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all -- --check

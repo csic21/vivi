@@ -133,8 +133,8 @@ impl RnNoise {
 
 impl NoiseSuppressor for RnNoise {
     fn process(&mut self, pcm: &mut [f32]) {
-        // chunks_exact_mut 保证每块恰好 FRAME_LEN，无需长度断言
-        for chunk in pcm.chunks_exact_mut(FRAME_LEN) {
+        // as_chunks_mut 在类型层面保证每块恰好 FRAME_LEN，无需长度断言
+        for chunk in pcm.as_chunks_mut::<FRAME_LEN>().0 {
             for (s, d) in chunk.iter().zip(self.scratch.iter_mut()) {
                 *d = s * 32768.0;
             }

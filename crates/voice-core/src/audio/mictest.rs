@@ -78,7 +78,7 @@ pub fn mic_test(
     let mut dec = LiveDecoder::new(48_000).map_err(|e| VoiceError::Codec(e.to_string()))?;
     let mut pkt = vec![0u8; MAX_PACKET_BYTES];
     let mut heard: Vec<f32> = Vec::with_capacity(want);
-    for frame in raw.chunks_exact(FRAME_LEN) {
+    for frame in raw.as_chunks::<FRAME_LEN>().0 {
         let mut f = [0.0f32; FRAME_LEN];
         f.copy_from_slice(frame);
         chain.process(&mut f);

@@ -1,0 +1,180 @@
+import { create } from "zustand";
+import { persist } from "zustand/middleware";
+import { ipc } from "../ipc";
+import { fetchTurnCreds } from "../api/signaling";
+import type { PeerStats } from "../types";
+
+interface VoiceState {
+  roomId: string | null;
+  userId: number | null;
+  busy: boolean;
+  error: string | null;
+  members: PeerStats[];
+  speakingSelf: boolean;
+  micLevel: number;
+  micGain: number;
+  speakerGain: number;
+  nsEnabled: boolean;
+  agcEnabled: boolean;
+  muted: boolean;
+  deafened: boolean;
+  pttEnabled: boolean;
+  pttKey: string;
+  inputDevice: string | null;
+  outputDevice: string | null;
+  showSettings: boolean;
+
+  setRoomInput: (id: string | null) => void;
+  setError: (e: string | null) => void;
+  setMuted: (m: boolean) => void;
+  setDeafened: (d: boolean) => void;
+  setPtt: (enabled: boolean, key: string) => void;
+  setDevices: (input: string | null, output: string | null) => void;
+  setShowSettings: (v: boolean) => void;
+  setMicGain: (g: number) => void;
+  setSpeakerGain: (g: number) => void;
+  setNsEnabled: (v: boolean) => void;
+  setAgcEnabled: (v: boolean) => void;
+  applyStats: () => void;
+
+  joinCurrentRoom: () => Promise<void>;
+  leaveRoom: () => Promise<void>;
+  rejoin: () => Promise<void>;
+}
+
+async function doJoin(
+  get: () => VoiceState,
+  set: (p: Partial<VoiceState>) => void,
+) {
+  const { roomId, inputDevice, outputDevice } = get();
+  if (!roomId) return;
+  set({ busy: true, error: null });
+  try {
+    // 先拿 TURN 凭证（失败则纯 P2P，不阻塞）
+    const turn = await fetchTurnCreds(Date.now() % 100000);
+    const userId = await ipc.joinRoom({
+      roomId,
+      input: inputDevice,
+      output: outputDevice,
+      turn,
+    });
+    set({ userId, busy: false });
+  } catch (e) {
+    set({ busy: false, error: friendlyError(String(e)) });
+    throw e;
+  }
+}
+
+/** 把 Rust 报错翻译成人话（带下一步动作，不只说问题）。 */
+function friendlyError(raw: string): string {
+  const msg = raw.toLowerCase();
+  if (msg.includes("permission") || msg.includes("denied") || msg.includes("not permitted")) {
+    return "麦克风权限被拒绝：去“系统设置 → 隐私与安全性 → 麦克风”里允许，然后重进房间。";
+  }
+  if (msg.includes("no default") || msg.includes("not found") || msg.includes("no device")) {
+    return "找不到麦克风：检查设备是否插好，或在首页换一个再进。";
+  }
+  if (
+    msg.includes("connection refused") ||
+    msg.includes("failed to connect") ||
+    msg.includes("websocket") ||
+    msg.includes("signal")
+  ) {
+    return "连不上信令：确认 App 在跑（本机 8080 被占用时会让路给已有的）；跨机器联调检查地址对不对。";
+  }
+  return raw;
+}
+
+export const useVoiceStore = create<VoiceState>()(
+  persist(
+    (set, get) => ({
+  roomId: null,
+  userId: null,
+  busy: false,
+  error: null,
+  members: [],
+  speakingSelf: false,
+  micLevel: 0,
+  micGain: 1,
+  speakerGain: 1,
+  nsEnabled: true,
+  agcEnabled: true,
+  muted: false,
+  deafened: false,
+  pttEnabled: false,
+  pttKey: "V",
+  inputDevice: null,
+  outputDevice: null,
+  showSettings: false,
+
+  setRoomInput: (roomId) => set({ roomId }),
+  setError: (error) => set({ error }),
+  setMuted: (muted) => {
+    set({ muted });
+    void ipc.setMuted(muted);
+  },
+  setDeafened: (deafened) => {
+    set({ deafened });
+    void ipc.setDeafened(deafened);
+  },
+  setPtt: (pttEnabled, pttKey) => set({ pttEnabled, pttKey }),
+  setDevices: (inputDevice, outputDevice) => set({ inputDevice, outputDevice }),
+  setShowSettings: (showSettings) => set({ showSettings }),
+  setMicGain: (micGain) => {
+    set({ micGain });
+    void ipc.setMicGain(micGain);
+  },
+  setSpeakerGain: (speakerGain) => {
+    set({ speakerGain });
+    void ipc.setSpeakerGain(speakerGain);
+  },
+  setNsEnabled: (nsEnabled) => {
+    set({ nsEnabled });
+    void ipc.setNsEnabled(nsEnabled);
+  },
+  setAgcEnabled: (agcEnabled) => {
+    set({ agcEnabled });
+    void ipc.setAgcEnabled(agcEnabled);
+  },
+
+  applyStats: () => {
+    void ipc.getStats().then((s) => {
+      if (!s) return;
+      set({
+        members: s.peers,
+        speakingSelf: s.speaking_self,
+        micLevel: s.mic_level,
+        micGain: s.mic_gain,
+        speakerGain: s.speaker_gain,
+        nsEnabled: s.ns_enabled,
+        agcEnabled: s.agc_enabled,
+      });
+    });
+  },
+
+  joinCurrentRoom: () => doJoin(get, set),
+  leaveRoom: async () => {
+    await ipc.leaveRoom().catch(() => undefined);
+    set({ roomId: null, userId: null, members: [], speakingSelf: false });
+  },
+  rejoin: async () => {
+    await ipc.leaveRoom().catch(() => undefined);
+    await doJoin(get, set);
+  },
+    }),
+    {
+      name: "gamevoice",
+      // 只记偏好，不记会话（房间/成员每次重进）
+      partialize: (s) => ({
+        inputDevice: s.inputDevice,
+        outputDevice: s.outputDevice,
+        pttEnabled: s.pttEnabled,
+        pttKey: s.pttKey,
+        micGain: s.micGain,
+        speakerGain: s.speakerGain,
+        nsEnabled: s.nsEnabled,
+        agcEnabled: s.agcEnabled,
+      }),
+    },
+  ),
+);

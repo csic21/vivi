@@ -1,0 +1,38 @@
+# Rust (保留 Cargo.lock，保证 CI 可复现构建)
+/target/
+**/target/
+*.rs.bk
+
+# Tauri
+apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/WixTools/
+apps/desktop/src-tauri/binaries/
+
+# Node (保留 pnpm-lock.yaml，保证 CI 可复现构建)
+node_modules/
+pnpm-store/
+
+# Vite
+*.local
+dist/
+dist-ssr/
+
+# macOS / Windows / Linux
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/
+
+# Local AI assistant configs (not part of the project)
+.agents/
+.claude/
+skills-lock.json

@@ -1,0 +1,23 @@
+[package]
+name = "voice-session"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio-tungstenite = "0.29"
+futures-util = "0.3"
+ringbuf = { workspace = true }
+voice-common = { workspace = true }
+voice-protocol = { workspace = true }
+voice-core = { workspace = true }
+voice-webrtc = { workspace = true }
+
+[dev-dependencies]
+signaling = { path = "../../apps/signaling" }
+axum = { workspace = true }

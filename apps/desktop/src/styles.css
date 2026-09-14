@@ -1,0 +1,528 @@
+/* GameVoice squad comms HUD.
+   One memorable element: the amber presence rail on the speaking row.
+   Everything else stays quiet. Motion answers state changes only. */
+
+:root {
+  --ink: #0e1420;
+  --panel: #151c29;
+  --panel-2: #1a2231;
+  --line: #263044;
+  --fog: #8e99ac;
+  --paper: #e9edf5;
+  --signal: #ffb224;
+  --signal-dim: rgba(255, 178, 36, 0.12);
+  --go: #34d17b;
+  --bad: #ff6166;
+  --radius: 10px;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--ink);
+  color: var(--paper);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-tap-highlight-color: transparent;
+}
+
+h1,
+h2,
+h3 {
+  text-wrap: balance;
+  margin: 0;
+}
+
+button,
+input,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+:focus {
+  outline: none;
+}
+
+:focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+::selection {
+  background: rgba(255, 178, 36, 0.3);
+}
+
+/* ---------- shell ---------- */
+
+.shell {
+  max-width: 600px;
+  margin: 0 auto;
+  padding: 28px 24px 32px;
+  min-height: 100vh;
+}
+
+/* ---------- home ---------- */
+
+.brand {
+  margin-top: 8vh;
+}
+
+.brand h1 {
+  font-size: 34px;
+  font-weight: 750;
+  letter-spacing: -0.01em;
+}
+
+.brand h1 .dot {
+  color: var(--signal);
+}
+
+.brand p {
+  color: var(--fog);
+  margin: 8px 0 0;
+  max-width: 44ch;
+}
+
+.joinrow {
+  display: flex;
+  gap: 8px;
+  margin-top: 22px;
+}
+
+.field {
+  flex: 1;
+  min-width: 0;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+}
+
+.field::placeholder {
+  color: var(--fog);
+  opacity: 0.7;
+}
+
+.btn {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 10px 16px;
+  font-weight: 600;
+  transition: background-color 120ms ease, border-color 120ms ease,
+    transform 80ms ease;
+}
+
+.btn:hover {
+  background: #212b3d;
+  border-color: #33405a;
+}
+
+.btn:active {
+  transform: translateY(1px);
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+  transform: none;
+}
+
+.btn-primary {
+  background: var(--signal);
+  border-color: var(--signal);
+  color: #1a1206;
+}
+
+.btn-primary:hover {
+  background: #ffc14d;
+  border-color: #ffc14d;
+}
+
+.btn-danger {
+  border-color: rgba(255, 97, 102, 0.55);
+  color: #ffb3b6;
+}
+
+.btn-danger:hover {
+  background: rgba(255, 97, 102, 0.14);
+}
+
+.devices {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+
+.devices legend {
+  color: var(--fog);
+  font-size: 12px;
+  padding: 0 6px;
+}
+
+.devices label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--fog);
+  font-size: 13px;
+  flex: 1;
+  min-width: 200px;
+}
+
+select {
+  background-color: var(--panel-2);
+  color: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 7px 9px;
+  max-width: 100%;
+}
+
+.notice {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--fog);
+  overflow-wrap: break-word;
+}
+
+.notice-error {
+  border-color: rgba(255, 97, 102, 0.5);
+  color: #ffc9cb;
+}
+
+/* ---------- room header ---------- */
+
+.roomhead {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.roomhead h2 {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.roomhead .self {
+  color: var(--fog);
+  font-size: 12px;
+  font-weight: 400;
+  margin-top: 2px;
+  display: block;
+}
+
+.pills {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.pill {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  background: var(--panel);
+  white-space: nowrap;
+}
+
+.pill .k {
+  color: var(--fog);
+  margin-right: 6px;
+}
+
+.pill-ok {
+  border-color: rgba(52, 209, 123, 0.45);
+  color: #7fe6a8;
+}
+
+.pill-warn {
+  border-color: rgba(255, 178, 36, 0.5);
+  color: var(--signal);
+}
+
+.pill-bad {
+  border-color: rgba(255, 97, 102, 0.55);
+  color: #ffb3b6;
+}
+
+/* ---------- squad list ---------- */
+
+.squad {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+}
+
+.squad-empty {
+  color: var(--fog);
+  padding: 18px 4px;
+}
+
+.member {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 12px 11px 16px;
+  border-bottom: 1px solid var(--line);
+  min-width: 0;
+}
+
+/* speaking wash: opacity-only overlay (compositor-friendly) */
+.member::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--signal-dim);
+  opacity: 0;
+  transition: opacity 160ms ease;
+  pointer-events: none;
+}
+
+.member.speaking::before {
+  opacity: 1;
+}
+
+/* presence rail: the memorable element */
+.rail {
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--line);
+  opacity: 1;
+  transition: background-color 160ms ease, opacity 160ms ease;
+}
+
+.member.speaking .rail {
+  background: var(--signal);
+  opacity: 1;
+}
+
+.member .who {
+  min-width: 0;
+  flex: 0 0 auto;
+}
+
+.member .name {
+  font-weight: 650;
+  overflow-wrap: break-word;
+}
+
+.member.speaking .name {
+  color: #fff;
+}
+
+.member .sub {
+  font-size: 12px;
+  color: var(--fog);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.member input[type="range"] {
+  flex: 1;
+  min-width: 60px;
+  accent-color: var(--signal);
+  height: 22px;
+  background: transparent;
+}
+
+/* self row level meter: transform-only animation (compositor-friendly) */
+.member.self {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  margin-bottom: 10px;
+}
+
+.levelbar {
+  flex: 1;
+  min-width: 80px;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.levelfill {
+  display: block;
+  height: 100%;
+  width: 100%;
+  background: var(--signal);
+  transform-origin: left center;
+  transform: scaleX(0);
+  transition: transform 70ms linear;
+}
+
+.levelfill.hot {
+  background: var(--bad);
+}
+
+/* ---------- control deck ---------- */
+
+.deck {
+  display: flex;
+  gap: 8px;
+  margin-top: 18px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.deck .me {
+  margin-left: auto;
+  font-size: 13px;
+  color: var(--fog);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+.lamp {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--line);
+  transition: background-color 160ms ease, opacity 160ms ease;
+}
+
+.lamp.on {
+  background: var(--signal);
+  opacity: 1;
+}
+
+/* ---------- settings ---------- */
+
+.settings {
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+}
+
+.settings h3 {
+  font-size: 14px;
+  margin-bottom: 10px;
+}
+
+.settings .row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.settings label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--fog);
+  font-size: 13px;
+}
+
+.settings input[type="text"] {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 7px 10px;
+  width: 110px;
+}
+
+.settings .hint {
+  font-size: 12px;
+  color: var(--fog);
+  margin: 8px 0 0;
+  max-width: 60ch;
+}
+
+.check {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--signal);
+}
+
+/* ---------- updater banner ---------- */
+
+.updater {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 600px;
+  margin: 12px auto 0;
+  padding: 9px 12px;
+  background: var(--panel);
+  border: 1px solid rgba(255, 178, 36, 0.5);
+  border-radius: var(--radius);
+  font-size: 13px;
+}
+
+.updater-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--signal);
+}
+
+.updater-text {
+  flex: 1;
+  min-width: 0;
+  color: var(--paper);
+}
+
+.updater-actions {
+  display: flex;
+  gap: 8px;
+  flex: none;
+}
+
+.btn-sm {
+  padding: 6px 12px;
+  font-size: 13px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .member::before,
+  .rail,
+  .lamp,
+  .btn {
+    transition: none;
+  }
+}

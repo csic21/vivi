@@ -1,0 +1,94 @@
+name: Release Desktop
+
+# 桌面端三平台打包：macOS / Windows / Linux，产物进 GitHub Release，
+# 并生成 updater 用的 latest.json（见 docs/release.md）。
+on:
+  push:
+    tags:
+      - "v*.*.*" # 如 v0.2.0（signaling-v* 走 release-signaling.yml）
+  workflow_dispatch: # 手动触发只构建不发版（调试用）
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            platform: macOS (Apple Silicon)
+          - os: ubuntu-22.04
+            platform: Linux (x64)
+          - os: windows-latest
+            platform: Windows (x64)
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check tag matches code versions
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: node apps/desktop/scripts/check-versions.mjs ${{ github.ref_name }}
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # src-tauri 是独立 crate，与根 workspace 分开缓存
+          workspaces: "apps/desktop/src-tauri -> target"
+
+      - name: Install Linux Tauri deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev \
+            libasound2-dev
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Generate icons from icon.png
+        # 仓库只收 icon.png 源文件，各平台图标在构建时生成，避免提交二进制
+        run: pnpm --dir apps/desktop tauri icon src-tauri/icons/icon.png
+
+      - name: Build & Release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: apps/desktop
+          tagName: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('draft-{0}', github.sha) }}
+          releaseName: "GameVoice ${{ github.ref_name }}"
+          releaseBody: "见下方 Assets 下载对应平台安装包。更新说明见 CHANGELOG（如有）。"
+          releaseDraft: true
+          prerelease: false
+          updaterJsonKeepUniversal: false
+
+  # 把各平台 .sig 拼成 latest.json，上传后把草稿 Release 转正，
+  # 客户端 updater endpoint 即可轮询到新版本。
+  updater-json:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: TAG=${{ github.ref_name }} REPO=${{ github.repository }} node apps/desktop/scripts/gen-latest-json.mjs
+      - run: gh release edit ${{ github.ref_name }} --repo ${{ github.repository }} --draft=false

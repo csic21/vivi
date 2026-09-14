@@ -1,0 +1,36 @@
+[workspace]
+members = [
+  "crates/voice-common",
+  "crates/voice-protocol",
+  "crates/voice-core",
+  "crates/voice-webrtc",
+  "crates/voice-session",
+  "apps/signaling",
+]
+exclude = ["apps/desktop/src-tauri"]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
+license = "MIT"
+rust-version = "1.85"
+
+[workspace.dependencies]
+tokio = { version = "1", features = ["full"] }
+axum = { version = "0.8", features = ["ws"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+anyhow = "1"
+thiserror = "2"
+cpal = "0.18"
+ringbuf = "0.5"
+uuid = { version = "1", features = ["v4", "serde"] }
+tower-http = { version = "0.7", features = ["cors", "trace"] }
+
+voice-common = { path = "crates/voice-common" }
+voice-protocol = { path = "crates/voice-protocol" }
+voice-core = { path = "crates/voice-core" }
+voice-webrtc = { path = "crates/voice-webrtc" }

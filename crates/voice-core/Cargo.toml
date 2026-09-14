@@ -1,0 +1,18 @@
+[package]
+name = "voice-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+voice-common = { workspace = true }
+voice-protocol = { workspace = true }
+tokio = { workspace = true }
+cpal = { workspace = true }
+ringbuf = { workspace = true }
+opus = "0.4"
+nnnoiseless = "0.5"
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }

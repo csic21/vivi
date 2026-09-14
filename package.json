@@ -1,0 +1,13 @@
+{
+  "name": "gamevoice-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "packageManager": "pnpm@12.4.1",
+  "scripts": {
+    "dev:desktop": "pnpm --dir apps/desktop dev",
+    "dev:tauri": "pnpm --dir apps/desktop tauri dev",
+    "check:rust": "cargo check --workspace",
+    "check:versions": "node apps/desktop/scripts/check-versions.mjs"
+  }
+}

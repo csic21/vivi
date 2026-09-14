@@ -1,0 +1,25 @@
+[package]
+name = "signaling"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+voice-common = { workspace = true }
+voice-protocol = { workspace = true }
+tokio = { workspace = true }
+axum = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+uuid = { workspace = true }
+tower-http = { workspace = true }
+hmac = "0.12"
+sha1 = "0.10"
+base64 = "0.22"
+futures-util = "0.3"
+
+[dev-dependencies]
+tokio-tungstenite = "0.29"

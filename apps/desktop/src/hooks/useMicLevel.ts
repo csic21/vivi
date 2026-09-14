@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { ipc } from "../ipc";
 import { useVoiceStore } from "../stores/useVoiceStore";
 
@@ -8,49 +8,73 @@ export function levelToPct(level: number): number {
   return Math.round(Math.min(1, Math.max(0, (db + 60) / 60)) * 100);
 }
 
+/** 话筒亮起门限：低于此视为环境底噪，避免麦标常闪。 */
+export function levelIsHot(level: number): boolean {
+  return levelToPct(level) >= 12;
+}
+
+type Listener = (level: number, stale: boolean) => void;
+
+const listeners = new Set<Listener>();
+let timer: ReturnType<typeof setInterval> | null = null;
+let shown = 0;
+let fails = 0;
+
+function startPoll() {
+  if (timer != null) return;
+  fails = 0;
+  shown = 0;
+  timer = setInterval(() => {
+    ipc
+      .micLevel()
+      .then((v) => {
+        fails = 0;
+        shown = v > shown ? shown + (v - shown) * 0.6 : shown + (v - shown) * 0.15;
+        for (const fn of listeners) fn(shown, false);
+      })
+      .catch(() => {
+        fails += 1;
+        const stale = fails >= 5;
+        for (const fn of listeners) fn(shown, stale);
+      });
+  }, 50);
+}
+
+function stopPoll() {
+  if (timer == null) return;
+  clearInterval(timer);
+  timer = null;
+  shown = 0;
+  fails = 0;
+}
+
 /**
  * 本端 mic 实时电平（50ms 轮询后端原子值），带真表头弹道：
  * 起得快（0.6）、落得慢（0.15），说话断句时表针自然回落不乱跳。
- * 只在房间内跑；离开房间自动停并归零。
- * `stale` 为 true 表示连调 5 次都失败（后端太旧/进程不对），UI 应提示重启。
+ * 房间内或试麦中才跑；多处订阅共用一个定时器。
  */
 export function useMicLevel(): { level: number; stale: boolean } {
-  const roomId = useVoiceStore((s) => s.roomId);
+  const enabled = useVoiceStore((s) => Boolean(s.roomId) || s.listening);
   const [level, setLevel] = useState(0);
-  const [fails, setFails] = useState(0);
-  const shown = useRef(0);
+  const [stale, setStale] = useState(false);
 
   useEffect(() => {
-    if (!roomId) {
-      shown.current = 0;
+    if (!enabled) {
       setLevel(0);
-      setFails(0);
+      setStale(false);
       return;
     }
-    let alive = true;
-    let f = 0;
-    const timer = setInterval(() => {
-      ipc
-        .micLevel()
-        .then((v) => {
-          if (!alive) return;
-          f = 0;
-          setFails(0);
-          const d = shown.current;
-          shown.current = v > d ? d + (v - d) * 0.6 : d + (v - d) * 0.15;
-          setLevel(shown.current);
-        })
-        .catch(() => {
-          if (!alive) return;
-          f += 1;
-          setFails(f);
-        });
-    }, 50);
-    return () => {
-      alive = false;
-      clearInterval(timer);
+    const fn: Listener = (v, s) => {
+      setLevel(v);
+      setStale(s);
     };
-  }, [roomId]);
+    listeners.add(fn);
+    startPoll();
+    return () => {
+      listeners.delete(fn);
+      if (listeners.size === 0) stopPoll();
+    };
+  }, [enabled]);
 
-  return { level, stale: fails >= 5 };
+  return { level, stale };
 }

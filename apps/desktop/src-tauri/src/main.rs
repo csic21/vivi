@@ -95,6 +95,7 @@ async fn join_room(
 
 #[tauri::command]
 async fn leave_room(state: State<'_, AppState>) -> Result<(), String> {
+    lock(&state.loopback).take();
     let prev = lock(&state.session).take();
     if let Some(h) = prev {
         h.leave().await;
@@ -191,9 +192,13 @@ fn get_stats(state: State<'_, AppState>) -> Option<SessionStats> {
     lock(&state.session).as_ref().map(|h| h.stats())
 }
 
-/// 本端 mic 实时电平（0.0~1.0，无锁直读；前端 50ms 轮询驱动律动条）。
+/// 本端 mic 实时电平（0.0~1.0，无锁直读；前端 50ms 轮询驱动话筒亮起/律动条）。
+/// 试麦环回优先：没进房间也能看到话筒跟着声音亮。
 #[tauri::command]
 fn mic_level(state: State<'_, AppState>) -> f32 {
+    if let Some(h) = lock(&state.loopback).as_ref() {
+        return h.level();
+    }
     lock(&state.session)
         .as_ref()
         .map(|h| h.mic_level())

@@ -23,6 +23,7 @@ interface VoiceState {
   inputDevice: string | null;
   outputDevice: string | null;
   showSettings: boolean;
+  listening: boolean;
 
   setRoomInput: (id: string | null) => void;
   setError: (e: string | null) => void;
@@ -36,6 +37,8 @@ interface VoiceState {
   setNsEnabled: (v: boolean) => void;
   setAgcEnabled: (v: boolean) => void;
   applyStats: () => void;
+  startMicTest: () => Promise<void>;
+  stopMicTest: () => Promise<void>;
 
   joinCurrentRoom: () => Promise<void>;
   leaveRoom: () => Promise<void>;
@@ -58,7 +61,7 @@ async function doJoin(
       output: outputDevice,
       turn,
     });
-    set({ userId, busy: false });
+    set({ userId, busy: false, listening: false });
   } catch (e) {
     set({ busy: false, error: friendlyError(String(e)) });
     throw e;
@@ -106,6 +109,7 @@ export const useVoiceStore = create<VoiceState>()(
   inputDevice: null,
   outputDevice: null,
   showSettings: false,
+  listening: false,
 
   setRoomInput: (roomId) => set({ roomId }),
   setError: (error) => set({ error }),
@@ -152,10 +156,27 @@ export const useVoiceStore = create<VoiceState>()(
     });
   },
 
+  startMicTest: async () => {
+    const { inputDevice, outputDevice } = get();
+    await ipc.micLoopbackStart({ input: inputDevice, output: outputDevice });
+    set({ listening: true });
+  },
+  stopMicTest: async () => {
+    await ipc.micLoopbackStop().catch(() => undefined);
+    set({ listening: false });
+  },
+
   joinCurrentRoom: () => doJoin(get, set),
   leaveRoom: async () => {
+    await ipc.micLoopbackStop().catch(() => undefined);
     await ipc.leaveRoom().catch(() => undefined);
-    set({ roomId: null, userId: null, members: [], speakingSelf: false });
+    set({
+      roomId: null,
+      userId: null,
+      members: [],
+      speakingSelf: false,
+      listening: false,
+    });
   },
   rejoin: async () => {
     await ipc.leaveRoom().catch(() => undefined);

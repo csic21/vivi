@@ -5,7 +5,7 @@
 //! Drop 即停止（pump 线程 ~10ms 内自行退出）。
 
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU32, Ordering},
     Arc,
 };
 use std::time::Duration;
@@ -22,6 +22,14 @@ pub struct LoopbackHandle {
     _cap: super::capture::CaptureHandle,
     _play: super::playback::PlaybackHandle,
     stop: Arc<AtomicBool>,
+    level_bits: Arc<AtomicU32>,
+}
+
+impl LoopbackHandle {
+    /// 原始 mic RMS（0.0~1.0），无锁直读，供试麦话筒图标/电平条。
+    pub fn level(&self) -> f32 {
+        f32::from_bits(self.level_bits.load(Ordering::Relaxed))
+    }
 }
 
 impl Drop for LoopbackHandle {
@@ -48,8 +56,10 @@ pub fn start_loopback(
     });
     let play = start_playback(output, play_cons, cap.sample_rate, cap.channels)?;
     let stop = Arc::new(AtomicBool::new(false));
+    let level_bits = Arc::new(AtomicU32::new(0));
     std::thread::spawn({
         let stop = Arc::clone(&stop);
+        let level_bits = Arc::clone(&level_bits);
         let mut mic = mic_cons;
         let mut prod = play_prod;
         let mut dsp = DspChain::new(true);
@@ -69,6 +79,9 @@ pub fn start_loopback(
                         return;
                     }
                 }
+                // 米表用 DSP 前的原始 mic，和通话会话同一口径。
+                let level = crate::dsp::rms(&frame);
+                level_bits.store(level.to_bits(), Ordering::Relaxed);
                 // 与通话上行同构（NS→VAD→AGC），听到即队友将听到的
                 dsp.process(&mut frame);
                 for s in frame.iter() {
@@ -86,5 +99,6 @@ pub fn start_loopback(
         _cap: cap,
         _play: play,
         stop,
+        level_bits,
     })
 }

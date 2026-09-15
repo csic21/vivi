@@ -81,7 +81,23 @@ pub struct CaptureHandle {
     pub stats: Arc<CaptureStats>,
 }
 
+/// 本机可驱动的采样格式（与 playback 对齐；Windows 上 U8 设备真实存在）。
+fn is_supported_format(f: SampleFormat) -> bool {
+    matches!(
+        f,
+        SampleFormat::F32
+            | SampleFormat::F64
+            | SampleFormat::I8
+            | SampleFormat::I16
+            | SampleFormat::I32
+            | SampleFormat::U8
+            | SampleFormat::U16
+            | SampleFormat::U32
+    )
+}
+
 /// 优先 F32 / mono / 48k；硬件不支持则退化为默认输入配置。
+/// 只挑可驱动的格式（不支持的直接跳过，免得选中了后面建流才报错）。
 fn pick_input_config(
     device: &cpal::Device,
     want: AudioConfig,
@@ -94,7 +110,7 @@ fn pick_input_config(
                     if let Some(cfg) = range.try_with_sample_rate(want.sample_rate) {
                         return Ok(cfg);
                     }
-                } else if any_mono_48k.is_none() {
+                } else if any_mono_48k.is_none() && is_supported_format(range.sample_format()) {
                     any_mono_48k = range.try_with_sample_rate(want.sample_rate);
                 }
             }
@@ -103,9 +119,16 @@ fn pick_input_config(
             return Ok(cfg);
         }
     }
-    device
+    let fallback = device
         .default_input_config()
-        .map_err(|e| VoiceError::Device(e.to_string()))
+        .map_err(|e| VoiceError::Device(e.to_string()))?;
+    if !is_supported_format(fallback.sample_format()) {
+        return Err(VoiceError::Stream(format!(
+            "unsupported input sample format: {:?} (device default, try another device)",
+            fallback.sample_format()
+        )));
+    }
+    Ok(fallback)
 }
 
 fn average_frame(sum: f32, channels: usize) -> f32 {
@@ -182,11 +205,26 @@ pub fn start_capture(
         SampleFormat::F32 => {
             build_input_stream::<f32>(&device, &stream_config, producer, Arc::clone(&stats))
         }
+        SampleFormat::F64 => {
+            build_input_stream::<f64>(&device, &stream_config, producer, Arc::clone(&stats))
+        }
+        SampleFormat::I8 => {
+            build_input_stream::<i8>(&device, &stream_config, producer, Arc::clone(&stats))
+        }
         SampleFormat::I16 => {
             build_input_stream::<i16>(&device, &stream_config, producer, Arc::clone(&stats))
         }
+        SampleFormat::I32 => {
+            build_input_stream::<i32>(&device, &stream_config, producer, Arc::clone(&stats))
+        }
+        SampleFormat::U8 => {
+            build_input_stream::<u8>(&device, &stream_config, producer, Arc::clone(&stats))
+        }
         SampleFormat::U16 => {
             build_input_stream::<u16>(&device, &stream_config, producer, Arc::clone(&stats))
+        }
+        SampleFormat::U32 => {
+            build_input_stream::<u32>(&device, &stream_config, producer, Arc::clone(&stats))
         }
         other => {
             return Err(VoiceError::Stream(format!(

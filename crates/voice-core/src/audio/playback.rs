@@ -50,8 +50,25 @@ pub struct PlaybackHandle {
     pub channels: u16,
 }
 
+/// 本机可驱动的采样格式（Windows 上一些 USB/虚拟设备只给 U8，
+/// 之前遇到就直接 `unsupported output sample format` 报错试麦失败）。
+fn is_supported_format(f: SampleFormat) -> bool {
+    matches!(
+        f,
+        SampleFormat::F32
+            | SampleFormat::F64
+            | SampleFormat::I8
+            | SampleFormat::I16
+            | SampleFormat::I32
+            | SampleFormat::U8
+            | SampleFormat::U16
+            | SampleFormat::U32
+    )
+}
+
 /// 优先同采样率 + 同声道 + F32；否则同采样率任意配置；再退化为默认输出配置。
 /// 采样率对不上时不做重采样（后续阶段处理），调用方应据日志检查。
+/// 只挑可驱动的格式（不支持的直接跳过，免得选中了后面建流才报错）。
 fn pick_output_config(
     device: &cpal::Device,
     sample_rate: u32,
@@ -65,7 +82,7 @@ fn pick_output_config(
                     if let Some(cfg) = range.try_with_sample_rate(sample_rate) {
                         return Ok(cfg);
                     }
-                } else if same_rate.is_none() {
+                } else if same_rate.is_none() && is_supported_format(range.sample_format()) {
                     same_rate = range.try_with_sample_rate(sample_rate);
                 }
             }
@@ -74,9 +91,16 @@ fn pick_output_config(
             return Ok(cfg);
         }
     }
-    device
+    let fallback = device
         .default_output_config()
-        .map_err(|e| VoiceError::Device(e.to_string()))
+        .map_err(|e| VoiceError::Device(e.to_string()))?;
+    if !is_supported_format(fallback.sample_format()) {
+        return Err(VoiceError::Stream(format!(
+            "unsupported output sample format: {:?} (device default, try another device)",
+            fallback.sample_format()
+        )));
+    }
+    Ok(fallback)
 }
 
 /// 每帧热路径：取 mono 采样并复制到全声道；取空则补零并计数。
@@ -160,11 +184,26 @@ pub fn start_playback(
         SampleFormat::F32 => {
             build_output_stream::<f32>(&device, &actual, consumer, Arc::clone(&stats))
         }
+        SampleFormat::F64 => {
+            build_output_stream::<f64>(&device, &actual, consumer, Arc::clone(&stats))
+        }
+        SampleFormat::I8 => {
+            build_output_stream::<i8>(&device, &actual, consumer, Arc::clone(&stats))
+        }
         SampleFormat::I16 => {
             build_output_stream::<i16>(&device, &actual, consumer, Arc::clone(&stats))
         }
+        SampleFormat::I32 => {
+            build_output_stream::<i32>(&device, &actual, consumer, Arc::clone(&stats))
+        }
+        SampleFormat::U8 => {
+            build_output_stream::<u8>(&device, &actual, consumer, Arc::clone(&stats))
+        }
         SampleFormat::U16 => {
             build_output_stream::<u16>(&device, &actual, consumer, Arc::clone(&stats))
+        }
+        SampleFormat::U32 => {
+            build_output_stream::<u32>(&device, &actual, consumer, Arc::clone(&stats))
         }
         other => {
             return Err(VoiceError::Stream(format!(

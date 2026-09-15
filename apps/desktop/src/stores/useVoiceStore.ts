@@ -107,6 +107,9 @@ function friendlyError(raw: string): string {
   if (msg.includes("no default") || msg.includes("not found") || msg.includes("no device")) {
     return "找不到麦克风：检查设备是否插好，或在首页换一个再进。";
   }
+  if (msg.includes("unsupported") && msg.includes("sample format")) {
+    return "这个音频设备格式不受支持：去首页/设置里换一个麦克风或扬声器再试。";
+  }
   if (
     msg.includes("connection refused") ||
     msg.includes("failed to connect") ||

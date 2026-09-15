@@ -1,4 +1,4 @@
-# Vivi v0.3.0
+# Vivi v0.3.1
 
 <img src="brand/icon-source.png" alt="Vivi" width="96" height="96" />
 

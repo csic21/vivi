@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.1
+
+- Windows 试麦修复：采集/播放支持 U8 等更多采样格式（部分 USB/虚拟设备只给 U8，之前直接报错失败）；选设备时跳过不可驱动的格式
+
 ## 0.3.0
 
 - 重命名：GameVoice → Vivi（窗口标题/安装包/bundle id `com.vivi.desktop`，旧偏好与信令地址自动迁移；bundle id 变更需手动安装一次）

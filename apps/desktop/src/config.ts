@@ -10,7 +10,8 @@ const env = (import.meta as unknown as { env?: Record<string, string | undefined
 export const DEFAULT_SIGNALING_HTTP: string =
   env?.VITE_SIGNALING_URL ?? "http://127.0.0.1:8080";
 
-const OVERRIDE_KEY = "gamevoice.signalingHttp";
+const OVERRIDE_KEY = "vivi.signalingHttp";
+const LEGACY_OVERRIDE_KEY = "gamevoice.signalingHttp";
 
 function normalizeHttp(raw: string): string {
   return raw.trim().replace(/\/+$/, "");
@@ -20,6 +21,17 @@ export function getSignalingHttp(): string {
   try {
     const saved = localStorage.getItem(OVERRIDE_KEY);
     if (saved && saved.trim()) return normalizeHttp(saved);
+    // 兼容旧版 GameVoice 存的地址：读到就迁移到新 key
+    const legacy = localStorage.getItem(LEGACY_OVERRIDE_KEY);
+    if (legacy && legacy.trim()) {
+      const next = normalizeHttp(legacy);
+      try {
+        localStorage.setItem(OVERRIDE_KEY, next);
+      } catch {
+        /* 忽略持久化失败 */
+      }
+      return next;
+    }
   } catch {
     /* localStorage 不可用时回退默认值 */
   }

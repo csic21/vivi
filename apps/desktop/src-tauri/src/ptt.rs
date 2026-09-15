@@ -129,7 +129,7 @@ pub fn parse_bind(raw: &str) -> Result<PttBind, String> {
 }
 
 pub fn permission_denied_msg() -> &'static str {
-    "按键说话需要辅助功能权限：打开「系统设置 → 隐私与安全性 → 辅助功能」，允许 GameVoice 后重试。"
+    "按键说话需要辅助功能权限：打开「系统设置 → 隐私与安全性 → 辅助功能」，允许 Vivi 后重试。"
 }
 
 /// macOS 上 `DeviceState::new()` 没权限会 assert 崩掉；开启 PTT 前先探测。

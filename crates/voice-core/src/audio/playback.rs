@@ -45,6 +45,9 @@ impl PlaybackStats {
 pub struct PlaybackHandle {
     _stream: cpal::Stream,
     pub stats: Arc<PlaybackStats>,
+    /// 硬件实际生效的采样率/声道（重采样目标，`start_playback` 回填）。
+    pub sample_rate: u32,
+    pub channels: u16,
 }
 
 /// 优先同采样率 + 同声道 + F32；否则同采样率任意配置；再退化为默认输出配置。
@@ -176,6 +179,8 @@ pub fn start_playback(
     Ok(PlaybackHandle {
         _stream: stream,
         stats,
+        sample_rate: actual.sample_rate,
+        channels: actual.channels,
     })
 }
 

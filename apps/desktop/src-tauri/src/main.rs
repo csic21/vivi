@@ -272,9 +272,12 @@ fn set_signaling_url(state: State<'_, AppState>, url: String) -> Result<String, 
 }
 
 fn main() {
-    let signaling_url =
-        std::env::var("GAMEVOICE_SIGNALING_URL").unwrap_or_else(|_| DEFAULT_SIGNALING_URL.into());
-    let stun_urls = std::env::var("GAMEVOICE_STUN_URLS")
+    // 新 env 优先，旧 GAMEVOICE_ 兼容（重命名前已部署的环境不断连）。
+    let signaling_url = std::env::var("VIVI_SIGNALING_URL")
+        .or_else(|_| std::env::var("GAMEVOICE_SIGNALING_URL"))
+        .unwrap_or_else(|_| DEFAULT_SIGNALING_URL.into());
+    let stun_urls = std::env::var("VIVI_STUN_URLS")
+        .or_else(|_| std::env::var("GAMEVOICE_STUN_URLS"))
         .map(|s| {
             s.split(',')
                 .map(str::trim)
@@ -345,5 +348,5 @@ fn main() {
             set_signaling_url
         ])
         .run(tauri::generate_context!())
-        .expect("failed to run gamevoice desktop");
+        .expect("failed to run vivi desktop");
 }

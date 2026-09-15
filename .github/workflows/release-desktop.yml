@@ -68,7 +68,7 @@ jobs:
         with:
           projectPath: apps/desktop
           tagName: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('draft-{0}', github.sha) }}
-          releaseName: "GameVoice ${{ github.ref_name }}"
+          releaseName: "Vivi ${{ github.ref_name }}"
           releaseBody: "见下方 Assets 下载对应平台安装包。更新说明见 CHANGELOG（如有）。"
           releaseDraft: true
           prerelease: false

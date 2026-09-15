@@ -313,8 +313,8 @@ impl VoicePeer {
 
         let ssrc = fresh_ssrc();
         let audio = Arc::new(TrackLocalStaticSample::new(MediaStreamTrack::new(
-            "gamevoice-stream".into(),
-            "gamevoice-audio".into(),
+            "vivi-stream".into(),
+            "vivi-audio".into(),
             "audio".into(),
             RtpCodecKind::Audio,
             vec![RTCRtpEncodingParameters {

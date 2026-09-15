@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { useVoiceStore } from "../stores/useVoiceStore";
 import { useAudioDevices } from "../hooks/useAudioDevices";
+import type { UpdaterState } from "../hooks/useUpdater";
 import { checkRoomExists, createRoom, normalizeRoomId } from "../api/signaling";
 import { getSignalingHttp, setSignalingHttp, wsFromHttp } from "../config";
 import { ipc } from "../ipc";
 import { MicTest } from "../components/MicTest";
 
-export function HomePage({ onJoin }: { onJoin: (roomId: string) => void }) {
+export function HomePage({ onJoin, updater }: { onJoin: (roomId: string) => void; updater?: UpdaterState }) {
   const [input, setInput] = useState("");
   const [signalInput, setSignalInput] = useState(getSignalingHttp);
   const [signalSaved, setSignalSaved] = useState(false);
@@ -104,7 +105,7 @@ export function HomePage({ onJoin }: { onJoin: (roomId: string) => void }) {
       <header className="brandbar">
         <h1>
           <img className="brand-mark" src="/icon.png" alt="" width={26} height={26} />
-          GameVoice<span className="dot">.</span>
+          Vivi<span className="dot">.</span>
         </h1>
         <span className="tag">小队语音</span>
       </header>
@@ -199,9 +200,40 @@ export function HomePage({ onJoin }: { onJoin: (roomId: string) => void }) {
           </div>
           <p className="hint">
             跨机开黑时，两台填同一个地址，都指向建房那台。地址不同，各连各的本机，房号一样也碰不上面。
+            Windows 与 Mac 互通：两台装同一个版本、连同一个信令地址即可互通；公司/校园网不通时需同 Wi-Fi 或开 TURN。
           </p>
         </fieldset>
       </div>
+      <HomeVersionFooter updater={updater} />
     </main>
+  );
+}
+
+function HomeVersionFooter({ updater }: { updater?: UpdaterState }) {
+  if (!updater) return null;
+  const { status, currentVersion, availableVersion } = updater;
+  const versionText = currentVersion ? `Vivi v${currentVersion}` : "Vivi";
+  const updateHint =
+    status === "available"
+      ? ` · 有新版本 v${availableVersion}，去房间内设置里更新`
+      : status === "checking" || status === "downloading"
+        ? " · 正在更新…"
+        : "";
+  return (
+    <footer className="home-foot" aria-label="版本信息">
+      <span>
+        {versionText}
+        {updateHint}
+      </span>
+      {status !== "available" && status !== "checking" && status !== "downloading" ? (
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          onClick={() => void updater.checkForUpdate()}
+        >
+          检查更新
+        </button>
+      ) : null}
+    </footer>
   );
 }

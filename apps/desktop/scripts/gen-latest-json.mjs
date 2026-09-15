@@ -68,7 +68,7 @@ if (Object.keys(platforms).length === 0) {
   process.exit(1);
 }
 
-let notes = `GameVoice ${TAG}`;
+let notes = `Vivi ${TAG}`;
 try {
   const f = process.env.NOTES_FILE;
   if (f) notes = readFileSync(f, "utf8").trim() || notes;

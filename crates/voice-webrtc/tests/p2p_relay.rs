@@ -2,7 +2,7 @@
 //!
 //! 前置：
 //! ```sh
-//! docker run -d --name gamevoice-coturn -p 3478:3478 -p 3478:3478/udp \
+//! docker run -d --name vivi-coturn -p 3478:3478 -p 3478:3478/udp \
 //!   -p 49160-49200:49160-49200/udp \
 //!   -v $PWD/infra/coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro \
 //!   coturn/coturn:latest

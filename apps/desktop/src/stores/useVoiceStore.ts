@@ -4,6 +4,19 @@ import { ipc } from "../ipc";
 import { checkRoomExists, currentSignalingWs, fetchTurnCreds, normalizeRoomId } from "../api/signaling";
 import type { PeerStats } from "../types";
 
+/** 旧版 GameVoice 存的偏好 key，首次启动迁移到 "vivi"，避免重命名后偏好丢失。 */
+try {
+  if (
+    typeof localStorage !== "undefined" &&
+    localStorage.getItem("vivi") == null &&
+    localStorage.getItem("gamevoice") != null
+  ) {
+    localStorage.setItem("vivi", localStorage.getItem("gamevoice") as string);
+  }
+} catch {
+  /* localStorage 不可用时忽略 */
+}
+
 interface VoiceState {
   roomId: string | null;
   userId: number | null;
@@ -207,7 +220,7 @@ export const useVoiceStore = create<VoiceState>()(
   },
     }),
     {
-      name: "gamevoice",
+      name: "vivi",
       // 只记偏好，不记会话（房间/成员每次重进）
       partialize: (s) => ({
         inputDevice: s.inputDevice,

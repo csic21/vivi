@@ -17,7 +17,8 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use voice_common::{RouteType, UserId};
 use voice_core::audio::{
-    capture_ring, start_capture, start_playback, CaptureConfig, CaptureProducer, PlaybackHandle,
+    capture_ring, frame_len_10ms, start_capture, start_playback, CaptureConfig, CaptureProducer,
+    MonoResampler, PlaybackHandle,
 };
 use voice_core::codec::{
     LiveDecoder, LiveEncoder, OpusConfig, OpusDecoder, OpusEncoder, FRAME_SAMPLES_10MS_48K,
@@ -301,21 +302,33 @@ impl Session {
         let (relay_inbox_tx, relay_inbox_rx) = mpsc::channel::<(u64, Vec<u8>)>(256);
 
         // ---- 音频：采集 ring + 播放 ring（Synthetic 模式跳过硬件）
-        let (mic_consumer, play_prod, _play_handle) = match config.audio {
+        // 跨平台注意：Windows 常见 44100Hz，macOS 常见 48000Hz。
+        // 采集统一重采样到 48k 进 DSP/Opus，混音 48k 再转回播放设备率，
+        // 两端采样率不同也能互通（之前非 48k 直接报错进不了房）。
+        let (mic_consumer, play_prod, _play_handle, capture_rate, play_rate) = match config.audio {
             AudioMode::Live { input, output } => {
                 let (cap, mic) = start_capture(input.as_deref(), CaptureConfig::default())?;
-                if cap.sample_rate != 48_000 {
-                    anyhow::bail!(
-                        "capture rate {}Hz != 48kHz; resampling not implemented yet",
-                        cap.sample_rate
+                let capture_rate = cap.sample_rate;
+                if capture_rate != 48_000 {
+                    tracing::info!(
+                        capture_rate,
+                        "capture not 48kHz; resampling to 48kHz for voice pipeline"
                     );
                 }
                 let (prod, cons) = capture_ring(CaptureConfig::default());
-                let handle =
-                    start_playback(output.as_deref(), cons, cap.sample_rate, cap.channels)?;
-                (Some(mic), Some(prod), Some(handle))
+                // 播放统一按 48k/mono 要：设备支持则零转换，不支持则回退默认
+                // 并在混音侧重采样（handle 带回实际值）。
+                let handle = start_playback(output.as_deref(), cons, 48_000, 1)?;
+                let play_rate = handle.sample_rate;
+                if play_rate != 48_000 {
+                    tracing::info!(
+                        play_rate,
+                        "playback not 48kHz; resampling mix to device rate"
+                    );
+                }
+                (Some(mic), Some(prod), Some(handle), capture_rate, play_rate)
             }
-            AudioMode::Synthetic => (None, None, None),
+            AudioMode::Synthetic => (None, None, None, 48_000, 48_000),
         };
         // _play_handle 必须活着：move 进主任务保持播放流运行
         let _play_handle: Option<PlaybackHandle> = _play_handle;
@@ -343,15 +356,22 @@ impl Session {
                 let mut pkt = vec![0u8; MAX_PACKET_BYTES];
                 let mut last_hint: u8 = 0;
                 let mut mic = mic_consumer;
+                // 采集设备率 → 48k：Windows 44100 等非 48k 设备在这里归一化，
+                // 与对端平台/采样率无关，保证 Windows↔Mac 互通。
+                let mut cap_resampler =
+                    (capture_rate != 48_000).then(|| MonoResampler::new(capture_rate, 48_000));
                 let mut phase_cyc = 0.0f64;
                 let mut abs_sample = 0u64;
                 let mut next = std::time::Instant::now();
                 let mut frame = [0f32; FRAME_SAMPLES_10MS_48K];
                 while !stop.load(Ordering::Relaxed) {
                     if muted.load(Ordering::Relaxed) {
-                        // 静音：排空 mic（防 unmute 时 500ms 陈旧突发），合成模式直接等
+                        // 静音：排空 mic + 重采样器（防 unmute 时 500ms 陈旧突发），合成模式直接等
                         if let Some(mic) = mic.as_mut() {
                             while mic.try_pop().is_some() {}
+                        }
+                        if let Some(r) = cap_resampler.as_mut() {
+                            r.clear();
                         }
                         speaking_self.store(false, Ordering::Relaxed);
                         audio_io.mic_level_bits.store(0, Ordering::Relaxed);
@@ -360,17 +380,33 @@ impl Session {
                     }
                     match mic.as_mut() {
                         Some(mic) => {
-                            let mut n = 0;
-                            while n < frame.len() {
-                                match mic.try_pop() {
-                                    Some(s) => {
-                                        frame[n] = s;
-                                        n += 1;
+                            if let Some(resampler) = cap_resampler.as_mut() {
+                                // 流式重采样：攒设备率采样，凑够一帧 48k 再走 DSP/Opus
+                                loop {
+                                    while let Some(s) = mic.try_pop() {
+                                        resampler.push(&[s]);
                                     }
-                                    None => std::thread::sleep(Duration::from_millis(1)),
+                                    if resampler.pop_frame(&mut frame) {
+                                        break;
+                                    }
+                                    std::thread::sleep(Duration::from_millis(1));
+                                    if stop.load(Ordering::Relaxed) {
+                                        return;
+                                    }
                                 }
-                                if stop.load(Ordering::Relaxed) {
-                                    return;
+                            } else {
+                                let mut n = 0;
+                                while n < frame.len() {
+                                    match mic.try_pop() {
+                                        Some(s) => {
+                                            frame[n] = s;
+                                            n += 1;
+                                        }
+                                        None => std::thread::sleep(Duration::from_millis(1)),
+                                    }
+                                    if stop.load(Ordering::Relaxed) {
+                                        return;
+                                    }
                                 }
                             }
                         }
@@ -508,6 +544,8 @@ impl Session {
             play_handle: _play_handle,
             play_drops: 0,
             mix_buf: [0.0; FRAME_SAMPLES_10MS_48K],
+            play_resampler: (play_rate != 48_000).then(|| MonoResampler::new(48_000, play_rate)),
+            play_frame: vec![0.0; frame_len_10ms(play_rate).max(1)],
             connected: HashMap::new(),
             control_rx,
             sig_rx,
@@ -572,6 +610,10 @@ struct CallMain {
     play_handle: Option<PlaybackHandle>,
     play_drops: u64,
     mix_buf: [f32; FRAME_SAMPLES_10MS_48K],
+    /// 48kHz 混音 → 播放设备率（`None` = 直通）。
+    play_resampler: Option<MonoResampler>,
+    /// 重采样输出暂存（按 10ms 播放帧长）。
+    play_frame: Vec<f32>,
     connected: HashMap<u64, bool>,
     control_rx: mpsc::Receiver<Control>,
     sig_rx: mpsc::Receiver<SignalMessage>,
@@ -1350,9 +1392,24 @@ impl CallMain {
             }
         }
         if let Some(prod) = self.play_prod.as_mut() {
-            for s in self.mix_buf.iter() {
-                if prod.try_push(*s).is_err() {
-                    self.play_drops += 1;
+            if let Some(resampler) = self.play_resampler.as_mut() {
+                // 48k 混音 → 播放设备率（如 Windows 44100）；ring 攒的是设备率采样
+                resampler.push(&self.mix_buf);
+                if resampler.pop_frame(&mut self.play_frame) {
+                    for s in self.play_frame.iter() {
+                        if prod.try_push(*s).is_err() {
+                            self.play_drops += 1;
+                        }
+                    }
+                } else {
+                    // 重采样器预热不足（首帧插值多要 1 采样）：丢一帧静音，避免爆音
+                    self.play_drops += self.play_frame.len() as u64;
+                }
+            } else {
+                for s in self.mix_buf.iter() {
+                    if prod.try_push(*s).is_err() {
+                        self.play_drops += 1;
+                    }
                 }
             }
         }

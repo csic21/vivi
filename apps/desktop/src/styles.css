@@ -1,4 +1,4 @@
-/* GameVoice — squad voice console.
+/* Vivi — squad voice console.
    Professional, restrained dark UI: fixed app frame, internal scroll regions,
    one accent (amber = live speech), everything else quiet. */
 
@@ -664,6 +664,42 @@ select {
 .bindkey.capturing {
   border-color: var(--signal);
   color: var(--signal);
+}
+
+.version {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.version-row {
+  justify-content: space-between;
+}
+
+.version-name {
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.version-state {
+  color: var(--fog);
+  font-size: 13px;
+}
+
+.version-actions {
+  margin-top: 8px;
+}
+
+.home-foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 8px;
+  color: var(--fog-dim);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 
 .hint {

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useVoiceStore } from "../stores/useVoiceStore";
 import { useAudioDevices } from "../hooks/useAudioDevices";
 import { levelToPct, useMicLevel } from "../hooks/useMicLevel";
+import type { UpdaterState } from "../hooks/useUpdater";
 import { ipc } from "../ipc";
 import { MicTest } from "./MicTest";
 
@@ -43,7 +44,7 @@ function eventToBind(code: string): string | null {
  * 设置：设备（房间内切换自动重进）+ 音频（试麦/麦音量/扬声器/降噪/增强）
  * + 输入模式（自由说话 / 按键说话）。按键说话由后端轮询 HID，不注册系统热键。
  */
-export function SettingsPanel() {
+export function SettingsPanel({ updater }: { updater?: UpdaterState }) {
   const inputDevice = useVoiceStore((s) => s.inputDevice);
   const outputDevice = useVoiceStore((s) => s.outputDevice);
   const setDevices = useVoiceStore((s) => s.setDevices);
@@ -276,6 +277,74 @@ export function SettingsPanel() {
           {msg}
         </p>
       ) : null}
+      <VersionRow updater={updater} />
     </section>
+  );
+}
+
+/** 设置底部：当前版本 + 更新状态 + 手动检查/更新入口。 */
+function VersionRow({ updater }: { updater?: UpdaterState }) {
+  if (!updater) return null;
+  const { status, currentVersion, availableVersion, error } = updater;
+  const versionText = currentVersion ? `v${currentVersion}` : "版本未知";
+  let stateText: string;
+  switch (status) {
+    case "idle":
+      stateText = "尚未检查更新";
+      break;
+    case "checking":
+      stateText = "正在检查更新…";
+      break;
+    case "up-to-date":
+      stateText = "已是最新版本";
+      break;
+    case "available":
+      stateText = availableVersion ? `发现新版本 v${availableVersion}` : "发现新版本";
+      break;
+    case "downloading":
+      stateText = `正在下载 v${availableVersion ?? ""}…`;
+      break;
+    case "ready":
+      stateText = "更新就绪，正在重启…";
+      break;
+    case "error":
+      stateText = "检查更新失败";
+      break;
+  }
+  return (
+    <div className="version">
+      <div className="row version-row">
+        <span className="version-name">Vivi {versionText}</span>
+        <span className="version-state" role="status" aria-live="polite">
+          {stateText}
+        </span>
+      </div>
+      <div className="row version-actions">
+        {status === "available" ? (
+          <>
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={() => void updater.downloadAndInstall()}
+            >
+              更新并重启
+            </button>
+            <button type="button" className="btn btn-sm" onClick={updater.dismiss}>
+              稍后
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            className="btn btn-sm"
+            disabled={status === "checking" || status === "downloading" || status === "ready"}
+            onClick={() => void updater.checkForUpdate()}
+          >
+            {status === "checking" ? "检查中…" : "检查更新"}
+          </button>
+        )}
+      </div>
+      {status === "error" && error ? <p className="hint">更新检查未成功：{error}</p> : null}
+    </div>
   );
 }

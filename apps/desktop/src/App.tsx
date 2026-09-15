@@ -29,9 +29,9 @@ export function App() {
     <div className="app">
       <UpdaterBanner updater={updater} />
       {roomId ? (
-        <RoomPage roomId={roomId} onLeave={() => setRoomId(null)} />
+        <RoomPage roomId={roomId} onLeave={() => setRoomId(null)} updater={updater} />
       ) : (
-        <HomePage onJoin={setRoomId} />
+        <HomePage onJoin={setRoomId} updater={updater} />
       )}
     </div>
   );

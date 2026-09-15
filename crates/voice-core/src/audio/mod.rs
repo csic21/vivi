@@ -6,6 +6,7 @@ pub mod device;
 pub mod loopback;
 pub mod mictest;
 pub mod playback;
+pub mod resample;
 
 pub use capture::{
     capture_ring, probe_default_input, start_capture, CaptureConfig, CaptureConsumer,
@@ -15,3 +16,4 @@ pub use device::{default_devices, find_device, list_devices};
 pub use loopback::{start_loopback, LoopbackHandle};
 pub use mictest::{mic_test, MicTestReport};
 pub use playback::{probe_default_output, start_playback, PlaybackHandle, PlaybackStats};
+pub use resample::{frame_len_10ms, resample_once, MonoResampler};

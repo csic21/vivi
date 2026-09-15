@@ -23,12 +23,9 @@ export interface UpdaterState {
 }
 
 function inTauri(): boolean {
-  return (
-    typeof window !== "undefined" &&
-    "__TAURI_INTERNALS__" in window &&
-    // vite dev 在浏览器里打开时插件不可用，直接跳过
-    window.location.protocol.startsWith("tauri")
-  );
+  // tauri dev 下 protocol 是 http，只有 release 包才是 tauri://，
+  // 所以只认 __TAURI_INTERNALS__；浏览器直开时没有这个标记，照样跳过。
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
 /**
@@ -85,6 +82,14 @@ export function useUpdater(autoCheck = true): UpdaterState {
   const dismiss = useCallback(() => {
     dismissedRef.current = true;
     setStatus("up-to-date");
+  }, []);
+
+  // 版本号与更新检查解耦：版本号一律尝试读取（设置页展示用），
+  // 只有更新检查才要求 Tauri 环境。浏览器预览时 check 静默跳过。
+  useEffect(() => {
+    getVersion()
+      .then((v) => setCurrentVersion(v))
+      .catch(() => setCurrentVersion(""));
   }, []);
 
   useEffect(() => {

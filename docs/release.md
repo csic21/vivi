@@ -18,14 +18,14 @@
 
 1. 生成签名密钥（本机跑一次即可）：
    ```bash
-   pnpm --dir apps/desktop tauri signer generate -w ~/.tauri/gamevoice.key
+   pnpm --dir apps/desktop tauri signer generate -w ~/.tauri/vivi.key
    # 输出：公钥（填到 tauri.conf.json）+ 私钥文件（填到 GitHub Secrets）
    # 询问密码时可直接回车（留空），CI 就不用配 PASSWORD
    ```
 2. 把输出的公钥填到 `apps/desktop/src-tauri/tauri.conf.json`
    → `plugins.updater.pubkey`（替换掉 `REPLACE_WITH_UPDATER_PUBLIC_KEY`）。
 3. GitHub 仓库 → Settings → Secrets and variables → Actions → New secret：
-   - `TAURI_SIGNING_PRIVATE_KEY`：粘贴 `~/.tauri/gamevoice.key` 私钥文件**全部内容**
+   - `TAURI_SIGNING_PRIVATE_KEY`：粘贴 `~/.tauri/vivi.key` 私钥文件**全部内容**
    - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`：生成密钥时设的密码（留空则填空字符串也要建一个，或删掉 workflow 里对应行）
 4. 私钥文件**不要**提交到仓库，`.gitignore` 已覆盖常见路径，`~/.tauri/` 在仓库外最安全。
 
@@ -70,9 +70,9 @@ git tag signaling-v0.2.0 && git push origin signaling-v0.2.0
   不是安装包坏了。当前没有 Apple 公证，Chrome/Safari 下载后会被 Gatekeeper 隔离；
   Sequoia 把未公证的包显示成「已损坏」。把 App 拖进「应用程序」后在终端执行：
   ```bash
-  codesign --force --deep --sign - /Applications/GameVoice.app
-  xattr -cr /Applications/GameVoice.app
-  open /Applications/GameVoice.app
+   codesign --force --deep --sign - /Applications/Vivi.app
+   xattr -cr /Applications/Vivi.app
+   open /Applications/Vivi.app
   ```
   以后要双击直接开，需要 Apple Developer 账号做签名+公证。
 - **Intel Mac 用户**：当前只打 ARM64 包，Intel 机经 Rosetta 2 可运行；

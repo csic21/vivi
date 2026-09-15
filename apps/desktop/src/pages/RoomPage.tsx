@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useVoiceStore } from "../stores/useVoiceStore";
 import { ipc } from "../ipc";
+import type { UpdaterState } from "../hooks/useUpdater";
 import { MemberList } from "../components/MemberList";
 import { ControlsBar } from "../components/ControlsBar";
 import { StatsBar } from "../components/StatsBar";
@@ -10,9 +11,11 @@ import { CopyIcon } from "../components/icons";
 export function RoomPage({
   roomId,
   onLeave,
+  updater,
 }: {
   roomId: string;
   onLeave: () => void;
+  updater?: UpdaterState;
 }) {
   const joinCurrentRoom = useVoiceStore((s) => s.joinCurrentRoom);
   const leaveRoom = useVoiceStore((s) => s.leaveRoom);
@@ -89,7 +92,7 @@ export function RoomPage({
       ) : null}
       <div className="room-body">
         <MemberList />
-        {showSettings ? <SettingsPanel /> : null}
+        {showSettings ? <SettingsPanel updater={updater} /> : null}
       </div>
       <ControlsBar onLeave={() => void quit()} />
     </main>

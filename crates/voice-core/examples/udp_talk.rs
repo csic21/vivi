@@ -21,7 +21,9 @@ use std::time::{Duration, Instant};
 use ringbuf::traits::{Consumer, Producer};
 use tokio::sync::mpsc;
 use tokio::time::MissedTickBehavior;
-use voice_core::audio::{capture_ring, start_capture, start_playback, CaptureConfig};
+use voice_core::audio::{
+    capture_ring, frame_len_10ms, start_capture, start_playback, CaptureConfig, MonoResampler,
+};
 use voice_core::codec::{
     LiveDecoder, LiveEncoder, OpusConfig, OpusDecoder, OpusEncoder, FRAME_SAMPLES_10MS_48K,
     MAX_PACKET_BYTES,
@@ -155,27 +157,41 @@ async fn main() -> anyhow::Result<()> {
                 return;
             }
         };
-        if capture.sample_rate != 48_000 {
-            eprintln!(
-                "capture rate {}Hz != 48kHz; resampling not implemented yet",
-                capture.sample_rate
-            );
-            return;
+        let capture_rate = capture.sample_rate;
+        if capture_rate != 48_000 {
+            eprintln!("capture: {capture_rate}Hz, resampling to 48kHz");
         }
         eprintln!("capture: {}Hz ch={}", capture.sample_rate, capture.channels);
+        let mut cap_resampler =
+            (capture_rate != 48_000).then(|| MonoResampler::new(capture_rate, 48_000));
         let mut frame = [0f32; FRAME_SAMPLES_10MS_48K];
         while !pump_stop.load(Ordering::Relaxed) {
-            let mut n = 0;
-            while n < frame.len() {
-                match mic.try_pop() {
-                    Some(s) => {
-                        frame[n] = s;
-                        n += 1;
+            if let Some(r) = cap_resampler.as_mut() {
+                loop {
+                    while let Some(s) = mic.try_pop() {
+                        r.push(&[s]);
                     }
-                    None => std::thread::sleep(Duration::from_millis(1)),
+                    if r.pop_frame(&mut frame) {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(1));
+                    if pump_stop.load(Ordering::Relaxed) {
+                        return;
+                    }
                 }
-                if pump_stop.load(Ordering::Relaxed) {
-                    return;
+            } else {
+                let mut n = 0;
+                while n < frame.len() {
+                    match mic.try_pop() {
+                        Some(s) => {
+                            frame[n] = s;
+                            n += 1;
+                        }
+                        None => std::thread::sleep(Duration::from_millis(1)),
+                    }
+                    if pump_stop.load(Ordering::Relaxed) {
+                        return;
+                    }
                 }
             }
             if let Ok(m) = enc.encode(&frame, &mut pkt) {
@@ -209,8 +225,9 @@ async fn main() -> anyhow::Result<()> {
         // 播放走默认输出；声道不匹配由 playback 内部扩展
         match start_playback(None, cons, 48_000, 1) {
             Ok(_handle) => {
+                let play_rate = _handle.sample_rate;
                 // handle 必须活着：move 进任务保持流运行
-                Some((prod, _handle))
+                Some((prod, _handle, play_rate))
             }
             Err(e) => {
                 eprintln!("playback failed (continuing without audio out): {e:#}");
@@ -232,6 +249,10 @@ async fn main() -> anyhow::Result<()> {
             }
         };
         let mut play = play_prod;
+        let play_rate = play.as_ref().map(|(_, _, r)| *r).unwrap_or(48_000);
+        let mut play_resampler =
+            (play_rate != 48_000).then(|| MonoResampler::new(48_000, play_rate));
+        let mut play_frame = vec![0.0f32; frame_len_10ms(play_rate).max(1)];
         let mut jb = AdaptiveJitterBuffer::new(JitterConfig::default());
         let mut tick = tokio::time::interval(Duration::from_millis(10));
         // 播放时钟：错过的 tick 直接跳过（追帧只会制造突发，不补）
@@ -270,10 +291,21 @@ async fn main() -> anyhow::Result<()> {
                         Ok(m) => m,
                         Err(_) => continue,
                     };
-                    if let Some((prod, _)) = play.as_mut() {
-                        for s in &pcm[..m] {
-                            if prod.try_push(*s).is_err() {
-                                dec_counters.play_dropped.fetch_add(1, Ordering::Relaxed);
+                    if let Some((prod, _, _)) = play.as_mut() {
+                        if let Some(r) = play_resampler.as_mut() {
+                            r.push(&pcm[..m]);
+                            if r.pop_frame(&mut play_frame) {
+                                for s in play_frame.iter() {
+                                    if prod.try_push(*s).is_err() {
+                                        dec_counters.play_dropped.fetch_add(1, Ordering::Relaxed);
+                                    }
+                                }
+                            }
+                        } else {
+                            for s in &pcm[..m] {
+                                if prod.try_push(*s).is_err() {
+                                    dec_counters.play_dropped.fetch_add(1, Ordering::Relaxed);
+                                }
                             }
                         }
                     }

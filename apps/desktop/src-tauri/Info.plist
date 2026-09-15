@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Tauri 会把本文件与它生成的 Info.plist 合并（bundle.macOS.infoPlist 可以显式
+       指定路径，不指定时也会自动找 src-tauri/Info.plist）。
+
+       macOS 15 (Sequoia) 起，app 访问局域网——包括 mDNS 多播和直连内网 IP——
+       需要用户授权。不声明这两项的话多播是**静默失败**：没有报错也没有弹窗，
+       表现就是「两台明明在同一个 Wi-Fi，却一个设备都发现不了」。
+       没有它们，discovery.rs 的代码全对也发不出一个包。 -->
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>Vivi 需要访问局域网，才能自动发现同一 Wi-Fi 下一起开黑的队友。</string>
+  <key>NSBonjourServices</key>
+  <array>
+    <!-- 必须和 discovery.rs 里的 SERVICE_TYPE 一致 -->
+    <string>_vivi-signal._tcp</string>
+  </array>
+</dict>
+</plist>

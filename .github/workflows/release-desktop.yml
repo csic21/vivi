@@ -86,5 +86,13 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
-      - run: TAG=${{ github.ref_name }} REPO=${{ github.repository }} node apps/desktop/scripts/gen-latest-json.mjs
-      - run: gh release edit ${{ github.ref_name }} --repo ${{ github.repository }} --draft=false
+      - name: Generate & upload latest.json
+        run: TAG=${{ github.ref_name }} REPO=${{ github.repository }} node apps/desktop/scripts/gen-latest-json.mjs
+      # 顺序要紧：latest.json 必须先传上去再转正，否则中间会有一段时间
+      # releases/latest 指向的 Release 里没有清单，客户端直接查不到更新。
+      - name: Publish the release
+        run: gh release edit ${{ github.ref_name }} --repo ${{ github.repository }} --draft=false
+      # 转正后才能走 releases/latest；这里断言客户端真正拿到的内容，
+      # 平台缺 key / 产物 404 都会让这一步标红（见脚本里的注释）。
+      - name: Smoke-test the public updater endpoint
+        run: TAG=${{ github.ref_name }} REPO=${{ github.repository }} node apps/desktop/scripts/verify-latest-json.mjs

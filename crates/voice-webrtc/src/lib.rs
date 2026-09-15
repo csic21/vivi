@@ -59,15 +59,21 @@ pub struct PeerConfig {
 impl Default for PeerConfig {
     fn default() -> Self {
         // 多 STUN：对称 NAT 下不同目标看到不同映射，多源 = 多组 srflx 候选。
-        // Google stun1~4 与主域名是不同 IP（2026-06 核实可用）；Cloudflare 等
-        // 未核实的不进默认，可经 PeerConfig / GAMEVOICE_STUN_URLS 追加。
+        //
+        // 列表按 2026-09-15 从国内出口实测（UDP Binding Request）挑的：
+        //   ✓ Google / Cloudflare / miwifi / bilibili
+        //   ✗ stun.qq.com、stun.syncthing.net —— 超时，别加回来：
+        //     不通的 STUN 不会报错，只会把 ICE gathering 拖到超时。
+        // 可达性随网络/运营商变化，可用 VIVI_STUN_URLS（逗号分隔）整组覆盖。
         Self {
             stun_urls: vec![
+                // 官方公开的 WebRTC STUN
                 "stun:stun.l.google.com:19302".into(),
                 "stun:stun1.l.google.com:19302".into(),
-                "stun:stun2.l.google.com:19302".into(),
-                "stun:stun3.l.google.com:19302".into(),
-                "stun:stun4.l.google.com:19302".into(),
+                "stun:stun.cloudflare.com:3478".into(),
+                // 国内公共 STUN：第三方服务，作备用源，随时可能失效
+                "stun:stun.miwifi.com:3478".into(),
+                "stun:stun.chat.bilibili.com:3478".into(),
             ],
             turn_urls: vec![],
             turn_username: None,

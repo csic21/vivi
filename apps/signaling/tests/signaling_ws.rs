@@ -303,3 +303,35 @@ async fn signaling_should_forward_relay_messages() {
         }
     );
 }
+
+/// `/info` 是客户端用来判断"这个端口上跑的是不是我们自己的信令"的探针
+/// （`apps/desktop/src-tauri/src/net.rs` 的 `probe_vivi` 认 `name` 里的
+/// `vivi-signaling`），形状被依赖，别随手改。
+#[tokio::test]
+async fn info_should_identify_the_service() {
+    let addr = spawn_server().await;
+    let resp = http_roundtrip(
+        addr,
+        "GET /info HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+    assert!(resp.starts_with("HTTP/1.1 200"), "{resp}");
+    let v: serde_json::Value = serde_json::from_str(body_of(&resp)).unwrap();
+    assert_eq!(v["name"], "vivi-signaling");
+    assert!(v["version"].as_str().is_some_and(|s| !s.is_empty()));
+    // 故意不返回房间列表：局域网里任何人都能打到这个端点
+    assert!(v.get("rooms").is_none(), "不该暴露房间列表：{v}");
+}
+
+/// `/health` 保持纯文本 `ok`：已有调用方和 docs/NETWORK.md 都按这个预期写的。
+#[tokio::test]
+async fn health_should_stay_plain_text() {
+    let addr = spawn_server().await;
+    let resp = http_roundtrip(
+        addr,
+        "GET /health HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+    assert!(resp.starts_with("HTTP/1.1 200"), "{resp}");
+    assert_eq!(body_of(&resp), "ok");
+}

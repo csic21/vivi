@@ -42,9 +42,14 @@ Mic 10ms + Encode 1ms + Network 28ms + Jitter 20ms + Decode 1ms + Playback 10ms 
 pnpm --dir apps/desktop tauri dev
 ```
 
-桌面 App 启动时会在本机 127.0.0.1:8080 起一个内嵌信令（建房/入会/TURN 凭证全套），
-8080 被占用则自动让路给已有的。跨机器联调时，被加入方把
-`VITE_SIGNALING_URL` 指向房主 IP 即可（如 `http://192.168.1.10:8080`）。
+桌面 App 启动时会起一个内嵌信令（建房/入会/TURN 凭证全套），绑 **0.0.0.0:8080**
+（局域网内可达，不是只监听本机）；8080 被占会先探一下是不是我们自己的信令，
+是就让路复用，不是就往后试 8081–8089。
+
+**跨机器联调不用配任何东西**：同一个 Wi-Fi 下，建房那台把 8 位房号发给对方，
+对方输进房间号框即可（mDNS 自动发现，见 `src-tauri/src/discovery.rs`）。
+不同网络请用房间里的「邀请队友」。地址框还在，但降级在首页「高级」里。
+原理、失效场景与自建服务器见 [`docs/NETWORK.md`](docs/NETWORK.md)。
 
 ```bash
 # Rust workspace 检查（含 signaling + voice-*）

@@ -47,10 +47,15 @@ git tag v0.2.0 && git push origin main v0.2.0
 流水线会自动：三平台构建 → 上传安装包到 draft Release →
 生成 `latest.json` → 转正 Release。客户端下次启动即收到更新。
 
+顺序上 `latest.json` 一定先上传、Release 后转正，然后流水线最后一步会跑
+`verify-latest-json.mjs` 做公网自检：等 `releases/latest` 翻到本次 tag，
+断言每个实际构建的平台族都有 key、每个产物的 URL 都下得动。这一步不过
+就是发版失败，别手动绕过。
+
 验证：打开刚发布的 Release，应看到各平台安装包、
 对应的 `.sig` 文件和 `latest.json`；浏览器访问
 `https://github.com/csic21/vivi/releases/latest/download/latest.json`
-应返回带四个平台（或实际构建出的平台）的 JSON。
+应返回带各平台（或实际构建出的平台）的 JSON。
 
 ## 发信令服务器新版（可选，独立版本线）
 
@@ -63,9 +68,23 @@ git tag signaling-v0.2.0 && git push origin signaling-v0.2.0
 
 ## 常见问题
 
-- **客户端没提示更新**：先确认 Release 里有 `latest.json`；
-  再确认 `pubkey` 已替换（占位符会导致签名校验失败，前端静默跳过，
-  DEV 模式下控制台有 `[updater]` 日志）。
+- **客户端没提示更新**：先看一眼 endpoint 到底返回了什么：
+  ```bash
+  curl -sL https://github.com/csic21/vivi/releases/latest/download/latest.json \
+    | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const m=JSON.parse(s);console.log(m.version, Object.keys(m.platforms).join(", "))})'
+  ```
+  三个坑按概率排：
+  1. **`platforms` 里缺你那个平台的 key**。客户端按 `{os}-{arch}-{installer}`
+     → `{os}-{arch}` 找 key，一个都没有就抛 `TargetsNotFound`，
+     界面表现得和"已是最新"一模一样。2026-09-15 的 v0.3.0/v0.3.1 就是这么翻车的
+     —— 脚本不认识裸 `.exe`/`.msi`，整个 windows 平台被静默跳过。
+     现在 `gen-latest-json.mjs` 遇到认不出的 `.sig` 会直接报错，CI 不会再放过。
+  2. **`version` 没跟着 tag 走**：Release 还是草稿时 `releases/latest` 会指向上一个版本，
+     客户端自然"已是最新"。转正后再等 `releases/latest` 翻转（流水线里的自检就在等这个）。
+  3. **`pubkey` 没替换**（占位符会导致签名校验失败）。
+- **点了"更新并重启"没反应**：以前这种情况是设计成的——`status === "error"` 时横幅直接
+  不渲染，所以下载失败/签名失败/安装失败看起来都像"按钮点不动"。现在横幅会显示一行
+  人话报错 + 重试，原始报错在设置页的版本区。排查时先看那里。
 - **macOS 提示“已损坏，无法打开”或“无法验证开发者”**：
   不是安装包坏了。当前没有 Apple 公证，Chrome/Safari 下载后会被 Gatekeeper 隔离；
   Sequoia 把未公证的包显示成「已损坏」。把 App 拖进「应用程序」后在终端执行：
@@ -75,7 +94,10 @@ git tag signaling-v0.2.0 && git push origin signaling-v0.2.0
    open /Applications/Vivi.app
   ```
   以后要双击直接开，需要 Apple Developer 账号做签名+公证。
-- **Intel Mac 用户**：当前只打 ARM64 包，Intel 机经 Rosetta 2 可运行；
-  有需求再加 `macos-13`（Intel）构建位。
+- **Intel Mac 用户**：**跑不了**。当前只出 `macos-latest`（Apple Silicon）的
+  arm64 包，清单里也只有 `darwin-aarch64` 一个 mac key。Rosetta 2 是让 M 系列
+  跑 x86 程序用的，反过来不成立。要支持 Intel 得加一个 Intel runner 的构建位
+  （`macos-13` 或更新的 Intel 镜像，注意 GitHub 会陆续下线 Intel runner），
+  并在清单里补出 `darwin-x86_64`。
 - **想先验证流水线不发版**：Actions 页手动 `workflow_dispatch`
   跑一次（只构建，产物不进 Release）。

@@ -6,6 +6,7 @@ import { MemberList } from "../components/MemberList";
 import { ControlsBar } from "../components/ControlsBar";
 import { StatsBar } from "../components/StatsBar";
 import { SettingsPanel } from "../components/SettingsPanel";
+import { InvitePanel } from "../components/InvitePanel";
 import { CopyIcon } from "../components/icons";
 
 export function RoomPage({
@@ -92,6 +93,7 @@ export function RoomPage({
       ) : null}
       <div className="room-body">
         <MemberList />
+        <InvitePanel roomId={roomId} />
         {showSettings ? <SettingsPanel updater={updater} /> : null}
       </div>
       <ControlsBar onLeave={() => void quit()} />

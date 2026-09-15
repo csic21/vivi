@@ -1,6 +1,6 @@
 [package]
 name = "vivi-desktop"
-version = "0.3.1"
+version = "0.4.0"
 edition = "2021"
 license = "MIT"
 
@@ -15,7 +15,16 @@ device_query = "4"
 axum = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["rt", "net"] }
+# 这里列的功能全是本 crate 自己真正用到的，不要再靠 voice-session 那边
+# workspace 的 "full" 隐式合并进来——那是巧合，人家哪天改成 ["rt"] 就崩：
+#   time/net/sync -> tokio::time::timeout、UdpSocket、lookup_host
+#   io-util       -> net.rs 里 TcpStream 的 read/write_all（AsyncReadExt/WriteExt）
+tokio = { version = "1", features = ["rt", "net", "time", "sync", "io-util"] }
+# 局域网自动发现 + 本机地址枚举（mdns-sd 内部也用 if-addrs，版本对齐省一次构建）
+mdns-sd = "0.21"
+if-addrs = "0.15"
+# mDNS 的实例名/主机名要带机器标识，不然队友看到一堆无意义的随机串
+hostname = "0.4"
 uuid = { version = "1", features = ["v4"] }
 signaling = { path = "../../signaling" }
 voice-common = { path = "../../../crates/voice-common" }

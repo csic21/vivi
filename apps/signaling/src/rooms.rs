@@ -35,7 +35,12 @@ impl AppState {
         if turn_secret == crate::turn::DEV_SECRET {
             tracing::warn!("TURN_SECRET not set; using dev secret (local only!)");
         }
-        let turn_urls = std::env::var("TURN_URLS")
+        // 没显式配 TURN_URLS 就**不签发**凭证，而不是兜一个 loopback 地址。
+        // 以前默认 `turn:127.0.0.1:3478`，等于告诉客户端"你的 TURN 在自己本机"——
+        // 客户端真的会去连自己的 127.0.0.1，必然分配失败，还要白等一轮 relay 超时。
+        // 没有 relay 候选是"打洞失败就没声音"，指向自己的假 TURN 则是"一定没声音还慢"。
+        // 客户端拿到空 urls 会直接跳过 TURN（api/signaling.ts 里 `!data.urls?.length` → null）。
+        let turn_urls: Vec<String> = std::env::var("TURN_URLS")
             .map(|s| {
                 s.split(',')
                     .map(str::trim)
@@ -43,7 +48,10 @@ impl AppState {
                     .map(str::to_owned)
                     .collect()
             })
-            .unwrap_or_else(|_| vec!["turn:127.0.0.1:3478".to_owned()]);
+            .unwrap_or_default();
+        if turn_urls.is_empty() {
+            tracing::info!("TURN_URLS not set; no relay credentials will be issued");
+        }
         Self {
             rooms: RwLock::new(HashMap::new()),
             turn_secret,

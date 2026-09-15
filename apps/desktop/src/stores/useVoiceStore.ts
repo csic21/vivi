@@ -1,7 +1,12 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { ipc } from "../ipc";
-import { checkRoomExists, currentSignalingWs, fetchTurnCreds, normalizeRoomId } from "../api/signaling";
+import {
+  currentSignalingWs,
+  ensureRoomReachable,
+  fetchTurnCreds,
+  normalizeRoomId,
+} from "../api/signaling";
 import type { PeerStats } from "../types";
 
 /** 旧版 GameVoice 存的偏好 key，首次启动迁移到 "vivi"，避免重命名后偏好丢失。 */
@@ -69,8 +74,9 @@ async function doJoin(
   if (rid !== roomId) set({ roomId: rid });
   set({ busy: true, error: null });
   try {
-    // 预检：房号错 / 信令不是同一个，直接报错，不进房空等
-    await checkRoomExists(rid);
+    // 预检 + 解析该连哪个信令：先试当前地址，不中再做一次局域网自动发现。
+    // 房号错 / 找不到房主都在这步报错，不进房空等。
+    await ensureRoomReachable(rid);
     // 先拿 TURN 凭证（失败则纯 P2P，不阻塞）
     const turn = await fetchTurnCreds(Date.now() % 100000);
     const userId = await ipc.joinRoom({
@@ -116,7 +122,12 @@ function friendlyError(raw: string): string {
     msg.includes("websocket") ||
     msg.includes("signal")
   ) {
-    return "连不上信令：确认 App 在跑（本机 8080 被占用时会让路给已有的）；跨机器联调检查地址对不对。";
+    // 注意区分两件事，否则用户会误以为"连上了就该有声音"：
+    // 信令通了只是能交换成员名单，声音是另一条 P2P 链路。
+    return (
+      "连不上房主的信令。同一 Wi-Fi 请重试（会自动重新发现），跨网络请让房主发邀请给你；" +
+      "若地址本来就能通，可能是房主那台 App 关了或防火墙拦了。"
+    );
   }
   return raw;
 }
@@ -206,6 +217,9 @@ export const useVoiceStore = create<VoiceState>()(
   joinCurrentRoom: () => doJoin(get, set),
   leaveRoom: async () => {
     await ipc.micLoopbackStop().catch(() => undefined);
+    // 房间在服务端是"最后一人离开即删"，所以离房 = 房间没了 = 广播也该撤。
+    // 不撤的话局域网里还会 resolve 到这台，对端白探一轮才失败。
+    await ipc.stopAdvertising().catch(() => undefined);
     await ipc.leaveRoom().catch(() => undefined);
     set({
       roomId: null,

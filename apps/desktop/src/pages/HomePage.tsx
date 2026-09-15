@@ -2,15 +2,25 @@ import { useEffect, useState } from "react";
 import { useVoiceStore } from "../stores/useVoiceStore";
 import { useAudioDevices } from "../hooks/useAudioDevices";
 import type { UpdaterState } from "../hooks/useUpdater";
-import { checkRoomExists, createRoom, normalizeRoomId } from "../api/signaling";
-import { getSignalingHttp, setSignalingHttp, wsFromHttp } from "../config";
+import {
+  createRoom,
+  ensureRoomReachable,
+  normalizeRoomId,
+} from "../api/signaling";
+import { looksLikeInvite, parseInvite } from "../api/invite";
+import {
+  getCreateSignalingHttp,
+  setAutoSignalingHttp,
+  setSignalingHttp,
+  wsFromHttp,
+} from "../config";
 import { ipc } from "../ipc";
 import { MicTest } from "../components/MicTest";
+import { SignalingPanel } from "../components/SignalingPanel";
 
 export function HomePage({ onJoin, updater }: { onJoin: (roomId: string) => void; updater?: UpdaterState }) {
   const [input, setInput] = useState("");
-  const [signalInput, setSignalInput] = useState(getSignalingHttp);
-  const [signalSaved, setSignalSaved] = useState(false);
+  const [inviteHint, setInviteHint] = useState<string | null>(null);
   const setRoomInput = useVoiceStore((s) => s.setRoomInput);
   const busy = useVoiceStore((s) => s.busy);
   const error = useVoiceStore((s) => s.error);
@@ -53,34 +63,14 @@ export function HomePage({ onJoin, updater }: { onJoin: (roomId: string) => void
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /** 保存信令地址：前端 HTTP 与 Rust WS 同源切换。 */
-  const saveSignaling = async () => {
-    const raw = signalInput.trim();
-    if (!raw) return;
-    if (!/^https?:\/\//.test(raw)) {
-      setError("信令地址以 http:// 或 https:// 开头，例如 http://192.168.1.10:8080。");
-      return;
-    }
-    const http = setSignalingHttp(raw);
-    setSignalInput(http);
-    setError(null);
-    try {
-      await ipc.setSignalingUrl(wsFromHttp(http));
-    } catch {
-      /* 非 Tauri 预览环境下忽略，后端仍用默认值 */
-    }
-    setSignalSaved(true);
-    setTimeout(() => setSignalSaved(false), 1500);
-  };
-
-  /** 入会：规范化房号 + 预检房间存在才进房，避免进房空等“还没队友”。 */
+  /** 入会：解析该连哪个信令（必要时自动发现）+ 预检房间存在，避免进房空等。 */
   const go = async (id: string) => {
     const rid = normalizeRoomId(id);
     if (!rid || busy) return;
     setError(null);
     useVoiceStore.setState({ busy: true });
     try {
-      await checkRoomExists(rid);
+      await ensureRoomReachable(rid);
     } catch (e) {
       useVoiceStore.setState({ busy: false });
       setError(String(e instanceof Error ? e.message : e));
@@ -94,10 +84,36 @@ export function HomePage({ onJoin, updater }: { onJoin: (roomId: string) => void
   const create = async () => {
     setError(null);
     try {
-      await go(await createRoom());
+      // 建房永远建在本机信令上；再把当前地址钉到本机，别让上一次自动发现
+      // 留下的"别人那台"把接下来的入会带偏。
+      const rid = await createRoom();
+      setAutoSignalingHttp(getCreateSignalingHttp());
+      // 广播出去，同一局域网的人输房号就能找到这台。
+      // 失败不阻塞建房——广播只影响"能不能被自动发现"，邀请串那条路照样通。
+      await ipc.startAdvertising(rid).catch(() => undefined);
+      await go(rid);
     } catch (e) {
-      setError(`建房失败，先确认信令在跑：cargo run -p signaling。${String(e)}`);
+      setError(String(e instanceof Error ? e.message : e));
     }
+  };
+
+  /** 房间号输入框也接受直接粘邀请串：一次填好房号 + 地址。 */
+  const onPasteRoom = (text: string) => {
+    if (!looksLikeInvite(text)) return false;
+    const inv = parseInvite(text);
+    if (!inv.room && !inv.http) return false;
+    if (inv.http) {
+      const http = setSignalingHttp(inv.http);
+      void ipc.setSignalingUrl(wsFromHttp(http)).catch(() => undefined);
+    }
+    if (inv.room) setInput(inv.room);
+    setError(null);
+    setInviteHint(
+      `已从邀请串识别：房间 ${inv.room ?? "（未识别）"}` +
+        (inv.http ? `，地址 ${inv.http}` : "，将自动查找房主"),
+    );
+    setTimeout(() => setInviteHint(null), 4000);
+    return true;
   };
 
   return (
@@ -119,10 +135,14 @@ export function HomePage({ onJoin, updater }: { onJoin: (roomId: string) => void
           autoFocus
           value={input}
           onChange={(e) => setInput(e.target.value)}
+          onPaste={(e) => {
+            // 只拦截"看起来像邀请串"的粘贴；粘普通房号照旧
+            if (onPasteRoom(e.clipboardData.getData("text"))) e.preventDefault();
+          }}
           onKeyDown={(e) => {
             if (e.key === "Enter") void go(input);
           }}
-          placeholder="输入房间号"
+          placeholder="输入房间号，或粘贴邀请"
         />
         <button
           type="button"
@@ -136,6 +156,11 @@ export function HomePage({ onJoin, updater }: { onJoin: (roomId: string) => void
           建房
         </button>
       </div>
+      {inviteHint ? (
+        <p className="notice notice-ok" role="status" aria-live="polite">
+          {inviteHint}
+        </p>
+      ) : null}
       {error ? (
         <div className="home-error">
           <p className="notice notice-error" role="alert" aria-live="polite">
@@ -145,6 +170,7 @@ export function HomePage({ onJoin, updater }: { onJoin: (roomId: string) => void
       ) : null}
       <div className="home-body">
         <MicTest />
+        <SignalingPanel busy={busy} onError={setError} />
         <fieldset className="panel">
           <legend>音频设备</legend>
           <div className="device-row">
@@ -177,31 +203,6 @@ export function HomePage({ onJoin, updater }: { onJoin: (roomId: string) => void
               ))}
             </select>
           </div>
-        </fieldset>
-        <fieldset className="panel">
-          <legend>信令</legend>
-          <div className="device-row">
-            <label htmlFor="sig">地址</label>
-            <input
-              id="sig"
-              className="field"
-              autoComplete="off"
-              spellCheck={false}
-              value={signalInput}
-              onChange={(e) => setSignalInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") void saveSignaling();
-              }}
-              placeholder="http://房主IP:8080"
-            />
-            <button type="button" className="btn" disabled={busy} onClick={() => void saveSignaling()}>
-              {signalSaved ? "已保存" : "保存"}
-            </button>
-          </div>
-          <p className="hint">
-            跨机开黑时，两台填同一个地址，都指向建房那台。地址不同，各连各的本机，房号一样也碰不上面。
-            Windows 与 Mac 互通：两台装同一个版本、连同一个信令地址即可互通；公司/校园网不通时需同 Wi-Fi 或开 TURN。
-          </p>
         </fieldset>
       </div>
       <HomeVersionFooter updater={updater} />

@@ -4,18 +4,38 @@
 //! 原则重申：实时音频全在 voice-session；本层只做会话持有、IPC 转发、PTT 监听。
 //! PTT 轮询跑在独立线程（按键按下/松开直改静音），渲染进程卡死也不影响收发。
 
+mod discovery;
+mod net;
 mod ptt;
 
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{Manager, State};
 use voice_common::DeviceInfo;
 use voice_session::{AudioMode, Session, SessionConfig, SessionHandle, SessionStats};
 use voice_webrtc::PeerConfig;
 
 const DEFAULT_SIGNALING_URL: &str = "ws://127.0.0.1:8080/signal";
 const DEFAULT_PTT_KEY: &str = "V";
+
+/// 内嵌信令的端口阶梯。
+///
+/// 8080 优先（口述地址、防火墙规则都按这个来），往后最多让到 8089 ——
+/// 再往后用户既猜不到也没法口述给别人，退让收益为零，不如老实报错。
+const PORT_MIN: u16 = 8080;
+const PORT_MAX: u16 = 8089;
+
+/// 内嵌信令的启动结果。前端靠它知道"本机信令在哪、能不能被局域网访问"。
+#[derive(Clone, Debug, Default, Serialize)]
+struct EmbeddedSignaling {
+    /// 本机信令端口；`None` = 没起来（8080–8089 都被无关服务占了）
+    port: Option<u16>,
+    /// `true` = 这个端口是我们自己起的；`false` = 让路复用了已在跑的进程
+    embedded: bool,
+    /// 局域网里别的机器连不连得上这个端口
+    lan_reachable: bool,
+}
 
 struct AppState {
     session: Mutex<Option<SessionHandle>>,
@@ -25,6 +45,12 @@ struct AppState {
     ptt_bind: Mutex<ptt::PttBind>,
     signaling_url: Mutex<String>,
     stun_urls: Vec<String>,
+    signaling: Mutex<EmbeddedSignaling>,
+    /// 懒创建的 mDNS 设备：首次发现/广播时才起 socket，
+    /// 平时不占着 5353，也避免没用发现功能的用户看到本机网络权限弹窗。
+    discovery: Mutex<Option<Arc<discovery::Discovery>>>,
+    /// 正在广播的房间号（广播的生命周期跟着"有没有在主持"走）
+    hosting_room: Mutex<Option<String>>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -271,6 +297,190 @@ fn set_signaling_url(state: State<'_, AppState>, url: String) -> Result<String, 
     Ok(url)
 }
 
+// ---------- 内嵌信令的启动 / 状态 ----------
+
+/// 起内嵌信令：按 [`PORT_MIN`]`..=`[`PORT_MAX`] 依次试。
+///
+/// 端口被占时先探 `/info` 判断是不是我们自己的信令——是就让路复用（保持原有
+/// 语义：用户手动跑了 `cargo run -p signaling` 时不重复起），是别的服务就继续
+/// 往后试，而不是像以前那样静默放弃。
+async fn start_embedded_signaling() -> EmbeddedSignaling {
+    for port in PORT_MIN..=PORT_MAX {
+        match tokio::net::TcpListener::bind(("0.0.0.0", port)).await {
+            Ok(listener) => {
+                eprintln!("embedded signaling on 0.0.0.0:{port} (LAN reachable)");
+                let sig_state = Arc::new(signaling::rooms::AppState::from_env());
+                tauri::async_runtime::spawn(async move {
+                    let _ = axum::serve(listener, signaling::app(sig_state)).await;
+                });
+                return EmbeddedSignaling {
+                    port: Some(port),
+                    embedded: true,
+                    lan_reachable: true,
+                };
+            }
+            Err(e) => {
+                if net::probe_vivi(port).await {
+                    eprintln!("port {port} is another vivi signaling; reusing it");
+                    return EmbeddedSignaling {
+                        port: Some(port),
+                        embedded: false,
+                        lan_reachable: probe_lan_reachable(port).await,
+                    };
+                }
+                eprintln!("port {port} busy and not vivi ({e}); trying next");
+            }
+        }
+    }
+    EmbeddedSignaling::default()
+}
+
+/// 已在跑的那个信令是不是也监听在局域网上。
+///
+/// 独立跑的 `signaling` 绑的是 `0.0.0.0`，但有人可能改成只绑 `127.0.0.1`。
+/// 那种情况下不能对外广播这个地址——否则局域网里所有人都会连到一个死地址。
+async fn probe_lan_reachable(port: u16) -> bool {
+    let Some(ip) = net::primary_lan_ip() else {
+        return false;
+    };
+    let addr = std::net::SocketAddr::from((ip, port));
+    matches!(
+        tokio::time::timeout(net::PROBE_TIMEOUT, tokio::net::TcpStream::connect(addr)).await,
+        Ok(Ok(_))
+    )
+}
+
+/// 懒创建 mDNS 设备。同步函数（不跨 await 持锁）。
+fn discovery_for(state: &AppState) -> Result<Arc<discovery::Discovery>, String> {
+    let mut slot = lock(&state.discovery);
+    if let Some(d) = slot.as_ref() {
+        return Ok(d.clone());
+    }
+    let d = Arc::new(discovery::Discovery::new()?);
+    *slot = Some(d.clone());
+    Ok(d)
+}
+
+#[derive(Serialize)]
+struct SignalingStatus {
+    /// 本机信令的 HTTP base；`None` = 没起来
+    local_http: Option<String>,
+    port: Option<u16>,
+    /// `true` = 我们自己起的；`false` = 复用了已在跑的进程
+    embedded: bool,
+    lan_reachable: bool,
+    lan_ips: Vec<String>,
+    primary_lan_ip: Option<String>,
+    /// 正在广播的房间号
+    advertising_room: Option<String>,
+}
+
+/// 本机信令现状。前端拿它渲染状态、拼地址、判断能不能自动发现。
+#[tauri::command]
+fn get_signaling_status(state: State<'_, AppState>) -> SignalingStatus {
+    let sig = lock(&state.signaling).clone();
+    SignalingStatus {
+        local_http: sig.port.map(|p| format!("http://127.0.0.1:{p}")),
+        port: sig.port,
+        embedded: sig.embedded,
+        lan_reachable: sig.lan_reachable,
+        lan_ips: net::lan_ipv4s().iter().map(|ip| ip.to_string()).collect(),
+        primary_lan_ip: net::primary_lan_ip().map(|ip| ip.to_string()),
+        advertising_room: lock(&state.hosting_room).clone(),
+    }
+}
+
+#[derive(Serialize)]
+struct DiscoveryResult {
+    servers: Vec<discovery::DiscoveredServer>,
+    /// mDNS 起不来时的原因；前端据此解释"为什么一个都没发现"
+    error: Option<String>,
+}
+
+/// 浏览局域网里正在广播的 Vivi 信令。
+///
+/// 返回的是**候选**，不含"哪个真的有这个房间"的判断——那一步由前端并发
+/// `GET /rooms/{id}` 决定（mDNS 缓存会撒谎，不能拿它当权威）。
+#[tauri::command]
+async fn discover_signaling(
+    state: State<'_, AppState>,
+    timeout_ms: Option<u64>,
+) -> Result<DiscoveryResult, String> {
+    let device = match discovery_for(&state) {
+        Ok(d) => d,
+        Err(e) => {
+            return Ok(DiscoveryResult {
+                servers: Vec::new(),
+                error: Some(e),
+            })
+        }
+    };
+    let timeout = timeout_ms
+        .map(std::time::Duration::from_millis)
+        .unwrap_or(discovery::BROWSE_TIMEOUT);
+    let servers = device.browse(timeout).await;
+    Ok(DiscoveryResult {
+        servers,
+        error: None,
+    })
+}
+
+/// 建房成功后开始广播，让同一局域网的人能靠房号找到这台。
+#[tauri::command]
+fn start_advertising(state: State<'_, AppState>, room_id: String) -> Result<(), String> {
+    let sig = lock(&state.signaling).clone();
+    let Some(port) = sig.port else {
+        return Err("本机信令没起来（8080–8089 都被占用），无法被局域网发现".into());
+    };
+    if !sig.lan_reachable {
+        return Err("本机信令只监听在 localhost，局域网内发现不到".into());
+    }
+    discovery_for(&state)?.advertise(&room_id, port)?;
+    *lock(&state.hosting_room) = Some(room_id);
+    Ok(())
+}
+
+/// 离房时撤销广播。
+#[tauri::command]
+fn stop_advertising(state: State<'_, AppState>) -> Result<(), String> {
+    if let Some(d) = lock(&state.discovery).as_ref() {
+        d.unadvertise();
+    }
+    *lock(&state.hosting_room) = None;
+    Ok(())
+}
+
+#[derive(Serialize)]
+struct InviteInfo {
+    room: String,
+    port: Option<u16>,
+    lan_ips: Vec<String>,
+    primary_lan_ip: Option<String>,
+    /// STUN 探到的出口公网地址；只有主动看邀请信息时才会去探
+    public_ip: Option<String>,
+    /// 出口在运营商大内网（100.64/10）：映射也救不了，得明说
+    cgnat: bool,
+}
+
+/// 生成邀请所需的候选地址。
+///
+/// 注意语义：`public_ip` 是 **UDP 出口**的映射地址，和 TCP 8080 的映射
+/// 没有任何关系。邀请串里写 `public_ip:port` 的隐含前提是"房主在路由器上
+/// 做过 8080/tcp 端口映射"——没做就是连不上，这个只能让队友试一次才知道。
+#[tauri::command]
+async fn build_invite(state: State<'_, AppState>, room_id: String) -> Result<InviteInfo, String> {
+    let sig = lock(&state.signaling).clone();
+    let public_ip = net::probe_public_ip(&state.stun_urls, net::PROBE_TIMEOUT).await;
+    Ok(InviteInfo {
+        room: room_id,
+        port: sig.port,
+        lan_ips: net::lan_ipv4s().iter().map(|ip| ip.to_string()).collect(),
+        primary_lan_ip: net::primary_lan_ip().map(|ip| ip.to_string()),
+        cgnat: public_ip.map(net::is_cgnat).unwrap_or(false),
+        public_ip: public_ip.map(|ip| ip.to_string()),
+    })
+}
+
 fn main() {
     // 新 env 优先，旧 GAMEVOICE_ 兼容（重命名前已部署的环境不断连）。
     let signaling_url = std::env::var("VIVI_SIGNALING_URL")
@@ -285,15 +495,9 @@ fn main() {
                 .map(str::to_owned)
                 .collect()
         })
-        .unwrap_or_else(|_| {
-            vec![
-                "stun:stun.l.google.com:19302".into(),
-                "stun:stun1.l.google.com:19302".into(),
-                "stun:stun2.l.google.com:19302".into(),
-                "stun:stun3.l.google.com:19302".into(),
-                "stun:stun4.l.google.com:19302".into(),
-            ]
-        });
+        // 不要再抄一份默认值到这里：唯一事实来源是 PeerConfig::default()
+        // （这里以前手抄了一份，改了那边不改这边就等于没改）。
+        .unwrap_or_else(|_| PeerConfig::default().stun_urls);
 
     tauri::Builder::default()
         .manage(AppState {
@@ -304,22 +508,26 @@ fn main() {
             ptt_bind: Mutex::new(ptt::PttBind::default_v()),
             signaling_url: Mutex::new(signaling_url),
             stun_urls,
+            signaling: Mutex::new(EmbeddedSignaling::default()),
+            discovery: Mutex::new(None),
+            hosting_room: Mutex::new(None),
         })
         .setup(|app| {
             ptt::spawn(app.handle().clone());
-            // 内嵌信令：0.0.0.0 监听，局域网另一台也能连；
-            // 端口被占（比如手动跑了 signaling）就让路，用现成的。
-            tauri::async_runtime::spawn(async {
-                match tokio::net::TcpListener::bind("0.0.0.0:8080").await {
-                    Ok(listener) => {
-                        eprintln!("embedded signaling on 0.0.0.0:8080 (LAN reachable)");
-                        let state = std::sync::Arc::new(signaling::rooms::AppState::from_env());
-                        let _ = axum::serve(listener, signaling::app(state)).await;
-                    }
-                    Err(e) => {
-                        eprintln!("embedded signaling skipped (port busy?): {e}");
-                    }
+            // 内嵌信令：0.0.0.0 监听，局域网另一台也能连。
+            // 结果写回 state，前端要靠它知道本机信令到底在哪个端口。
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let result = start_embedded_signaling().await;
+                eprintln!(
+                    "signaling: port={:?} embedded={} lan_reachable={}",
+                    result.port, result.embedded, result.lan_reachable
+                );
+                if result.port.is_none() {
+                    eprintln!("signaling: 8080-{PORT_MAX} 都被无关服务占用，本机信令没起来");
                 }
+                let state = handle.state::<AppState>();
+                *lock(&state.signaling) = result;
             });
             Ok(())
         })
@@ -345,7 +553,12 @@ fn main() {
             set_ptt_enabled,
             set_ptt_key,
             get_signaling_url,
-            set_signaling_url
+            set_signaling_url,
+            get_signaling_status,
+            discover_signaling,
+            start_advertising,
+            stop_advertising,
+            build_invite
         ])
         .run(tauri::generate_context!())
         .expect("failed to run vivi desktop");

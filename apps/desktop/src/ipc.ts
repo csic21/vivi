@@ -1,6 +1,15 @@
 /** Tauri IPC 类型化封装（命令见 src-tauri/src/main.rs）。 */
 import { invoke } from "@tauri-apps/api/core";
-import type { DeviceInfo, PttState, SessionStats, TurnConfig } from "./types";
+import type {
+  DeviceInfo,
+  DiscoveredServer,
+  DiscoveryResult,
+  InviteInfo,
+  PttState,
+  SessionStats,
+  SignalingStatus,
+  TurnConfig,
+} from "./types";
 
 export const ipc = {
   listAudioDevices: () => invoke<DeviceInfo[]>("list_audio_devices"),
@@ -34,4 +43,21 @@ export const ipc = {
   setPttEnabled: (enabled: boolean) =>
     invoke<void>("set_ptt_enabled", { enabled }),
   setPttKey: (key: string) => invoke<string>("set_ptt_key", { key }),
+
+  // ---------- 自动发现 / 邀请 ----------
+
+  /** 本机信令在哪个端口、起没起来、能不能被局域网访问。 */
+  getSignalingStatus: () => invoke<SignalingStatus>("get_signaling_status"),
+  /** 浏览局域网里正在广播的 Vivi。返回的是候选，房间是否存在要再探 HTTP。 */
+  discoverSignaling: (timeoutMs?: number) =>
+    invoke<DiscoveryResult>("discover_signaling", { timeoutMs: timeoutMs ?? null }),
+  /** 建房后开始广播，让同一局域网的人能靠房号找到这台。 */
+  startAdvertising: (roomId: string) =>
+    invoke<void>("start_advertising", { roomId }),
+  /** 离房时撤销广播。 */
+  stopAdvertising: () => invoke<void>("stop_advertising"),
+  /** 取生成邀请所需的候选地址（会做一次 STUN 探测）。 */
+  buildInvite: (roomId: string) => invoke<InviteInfo>("build_invite", { roomId }),
 };
+
+export type { DiscoveredServer, DiscoveryResult, InviteInfo, SignalingStatus };

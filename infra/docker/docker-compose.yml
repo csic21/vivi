@@ -5,6 +5,8 @@ services:
       - "8080:8080"
     environment:
       TURN_SECRET: ${TURN_SECRET:-dev-secret-change-me}
+      # 注意：这个默认值是 **compose 网络内部** 的名字，容器外的客户端解析不了。
+      # 生产必须显式传客户端可达的地址，比如 TURN_URLS=turn:<公网IP>:3478。
       TURN_URLS: ${TURN_URLS:-turn:coturn:3478}
     command: cargo run -p signaling
   coturn:

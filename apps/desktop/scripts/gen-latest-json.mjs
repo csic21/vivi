@@ -98,10 +98,15 @@ for (const [name, asset] of byName) {
     continue;
   }
   const signature = gh("release", "download", TAG, "--pattern", name, "--output", "-").trim();
+  // **不要**用 `gh release view` 给的 assets[].url。Release 还是草稿时（本脚本
+  // 就是在草稿阶段跑的，这是设计）那个字段是 `.../download/untagged-<hash>/<file>`
+  // ——草稿还没有 tag；转正之后这个地址就不解析了，客户端全员 404。
+  // 直接用 tag 拼，草稿和正式拿到的是同一个地址。verifier 里有对应断言兜底。
+  const url = `https://github.com/${REPO}/releases/download/${TAG}/${encodeURIComponent(bundle)}`;
   for (const { rid, bundle: kind } of entries) {
     // 变体 key：精准路由到同安装方式的客户端
-    platforms[`${rid}-${kind}`] = { signature, url: target.url };
-    pending.push({ rid, kind, signature, url: target.url });
+    platforms[`${rid}-${kind}`] = { signature, url };
+    pending.push({ rid, kind, signature, url });
   }
 }
 // 主 key：同 rid 多包时按优先级只留一个（windows 优先 nsis，linux 优先 appimage）

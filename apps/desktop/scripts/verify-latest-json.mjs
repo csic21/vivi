@@ -80,32 +80,54 @@ async function main() {
   }
   console.log(`期望平台族：${[...families].join(", ")}`);
 
+  // 整段都放进轮询里，包括产物可达性。
+  //
+  // 为什么不能只等版本号：`--draft=false` 之后 GitHub 各条路径的传播时间不一样。
+  // v0.4.0 这次就是——`releases/latest/download/latest.json` 已经返回新版本了，
+  // 但同一个 Release 里直接走 tag 的 `releases/download/v0.4.0/<包>` 还在 404，
+  // 几秒后才好。单次判定会把这种"暂时没传播开"误报成"产物挂了"。
   const deadline = Date.now() + TIMEOUT_SECS * 1000;
-  let manifest = null;
+  let lastProblems = ["（还没拿到 manifest）"];
+  let keys = [];
   for (;;) {
     const { manifest: got, error } = await fetchManifest();
     if (got) {
       if (got.version === VERSION) {
-        manifest = got;
-        break;
+        keys = Object.keys(got.platforms || {});
+        lastProblems = await inspect(got, keys, families);
+        if (lastProblems.length === 0) {
+          console.log(
+            `\n✓ ${ENDPOINT} 已指向 v${VERSION}，${keys.length} 个平台 key 全部可用。`,
+          );
+          return;
+        }
+        console.log(
+          `… 版本对了，还差 ${lastProblems.length} 项：${lastProblems[0]}`,
+        );
+      } else {
+        // 版本对不上通常是 latest 还指着上一个 Release，等它翻。
+        console.log(`… endpoint 当前是 v${got.version}，等它变成 v${VERSION}`);
       }
-      // 版本对不上通常是 latest 还指着上一个 Release，等它翻。
-      console.log(`… endpoint 当前是 v${got.version}，等它变成 v${VERSION}`);
     } else {
       console.log(`… ${error}（latest.json 可能还没传播开）`);
     }
     if (Date.now() >= deadline) {
-      console.error(`✗ 等了 ${TIMEOUT_SECS}s，${ENDPOINT} 仍未返回 v${VERSION}。`);
-      console.error("  检查：Release 是否已转正、latest.json 是否上传成功。");
+      console.error(`\n✗ 等了 ${TIMEOUT_SECS}s 仍未通过自检：`);
+      for (const p of lastProblems) console.error(`  - ${p}`);
+      console.error(
+        "  逐项排查：Release 是否已转正、latest.json 是否上传成功、" +
+          "产物地址是否真的存在。",
+      );
       process.exit(1);
     }
     await sleep(INTERVAL_SECS * 1000);
   }
+}
 
-  const keys = Object.keys(manifest.platforms || {});
-  console.log(`endpoint 返回 v${manifest.version}，平台 key：${keys.join(", ")}`);
-
+/** 检查一份 manifest：平台齐全、字段完整、产物真的下得动。返回问题列表。 */
+async function inspect(manifest, keys, families) {
   const problems = [];
+  console.log(`endpoint 返回 v${manifest.version}，平台 key：${keys.join(", ")}`);
 
   // 1) 平台齐全：漏一整个族正是那次翻车的样子。
   for (const family of families) {
@@ -114,26 +136,30 @@ async function main() {
     }
   }
 
-  // 2) 每个 key 形状正确
+  // 2) 每个 key 形状正确，且地址走的是**本 tag** 而不是草稿期的 untagged-<hash>。
+  //    草稿地址在 Release 转正后会 404，客户端一个都下不动——v0.4.0 踩过。
+  const expectedPrefix = `https://github.com/${REPO}/releases/download/${TAG}/`;
   for (const key of keys) {
     const entry = manifest.platforms[key];
-    if (!entry?.url || !entry?.signature) problems.push(`${key}：缺 url 或 signature`);
+    if (!entry?.url || !entry?.signature) {
+      problems.push(`${key}：缺 url 或 signature`);
+      continue;
+    }
+    if (!entry.url.startsWith(expectedPrefix)) {
+      problems.push(`${key}：地址不是本 tag 的路径（草稿期 URL？）—— ${entry.url}`);
+    }
   }
 
-  // 3) 产物真的下得动
-  for (const key of keys) {
-    const entry = manifest.platforms[key];
-    if (!entry?.url) continue;
-    const bad = await checkUrl(entry.url);
-    if (bad) problems.push(`${key}：${entry.url.split("/").pop()} 不可访问（${bad}）`);
+  // 3) 产物真的下得动（同一个 url 只探一次，manifest 里多个 key 会指向同一个包）
+  const urls = new Set(
+    keys.map((k) => manifest.platforms[k]?.url).filter(Boolean),
+  );
+  for (const url of urls) {
+    const bad = await checkUrl(url);
+    if (bad) problems.push(`${url.split("/").pop()} 不可访问（${bad}）`);
   }
 
-  if (problems.length > 0) {
-    console.error("\n✗ latest.json 自检未通过：");
-    for (const p of problems) console.error(`  - ${p}`);
-    process.exit(1);
-  }
-  console.log(`\n✓ ${ENDPOINT} 已指向 v${VERSION}，${keys.length} 个平台 key 全部可用。`);
+  return problems;
 }
 
 main().catch((e) => {

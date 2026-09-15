@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { ipc } from "../ipc";
-import { fetchTurnCreds } from "../api/signaling";
+import { checkRoomExists, currentSignalingWs, fetchTurnCreds, normalizeRoomId } from "../api/signaling";
 import type { PeerStats } from "../types";
 
 interface VoiceState {
@@ -52,15 +52,20 @@ async function doJoin(
 ) {
   const { roomId, inputDevice, outputDevice } = get();
   if (!roomId) return;
+  const rid = normalizeRoomId(roomId);
+  if (rid !== roomId) set({ roomId: rid });
   set({ busy: true, error: null });
   try {
+    // 预检：房号错 / 信令不是同一个，直接报错，不进房空等
+    await checkRoomExists(rid);
     // 先拿 TURN 凭证（失败则纯 P2P，不阻塞）
     const turn = await fetchTurnCreds(Date.now() % 100000);
     const userId = await ipc.joinRoom({
-      roomId,
+      roomId: rid,
       input: inputDevice,
       output: outputDevice,
       turn,
+      signalingUrl: currentSignalingWs(),
     });
     set({
       userId,
@@ -77,7 +82,12 @@ async function doJoin(
 
 /** 把 Rust 报错翻译成人话（带下一步动作，不只说问题）。 */
 function friendlyError(raw: string): string {
+  // 预检抛出的中文业务错误直接透出（房间/信令），别被下面的英文关键词误判
+  if (raw.includes("房间") || raw.includes("信令")) return raw;
   const msg = raw.toLowerCase();
+  if (msg.includes("room not found") || msg.includes("room_id") || msg.includes("room ")) {
+    return `房间不存在：房号打错，或两台连的不是同一个信令。${raw}`;
+  }
   if (msg.includes("permission") || msg.includes("denied") || msg.includes("not permitted")) {
     return "麦克风权限被拒绝：去“系统设置 → 隐私与安全性 → 麦克风”里允许，然后重进房间。";
   }

@@ -31,7 +31,7 @@ export function MemberList() {
           <br />
           <span className="sub">
             {stale
-              ? "电平无数据：重启 tauri dev"
+              ? "电平无数据：重启应用"
               : selfHot
                 ? "正在说话"
                 : muted
@@ -56,9 +56,13 @@ export function MemberList() {
         </span>
       </div>
       {members.length === 0 ? (
-        <p className="squad-empty">还没队友。复制房间号发给他们，进来就能说话。</p>
+        <p className="squad-empty">暂无队友。把房间号发给队友，对方进来后会自动出现在这里。</p>
       ) : (
-        <ul className="squad" aria-live="polite">
+        <>
+          <p className="caption">
+            队友 · {members.length}
+          </p>
+          <ul className="squad" aria-live="polite">
           {[...members]
             .sort((a, b) => a.user_id - b.user_id)
             .map((m) => (
@@ -100,7 +104,8 @@ export function MemberList() {
                 />
               </li>
             ))}
-        </ul>
+          </ul>
+        </>
       )}
     </>
   );

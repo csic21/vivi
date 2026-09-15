@@ -70,7 +70,7 @@ export function ControlsBar({ onLeave }: { onLeave: () => void }) {
             ? `按住 ${pttKey} 说话`
             : muted
               ? "已静音"
-              : "静默"}
+              : "就绪"}
       </span>
     </footer>
   );

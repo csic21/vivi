@@ -23,7 +23,7 @@ struct AppState {
     ptt_enabled: Mutex<bool>,
     ptt_key: Mutex<String>,
     ptt_bind: Mutex<ptt::PttBind>,
-    signaling_url: String,
+    signaling_url: Mutex<String>,
     stun_urls: Vec<String>,
 }
 
@@ -55,8 +55,10 @@ async fn join_room(
     input: Option<String>,
     output: Option<String>,
     turn: Option<TurnConfig>,
+    signaling_url: Option<String>,
 ) -> Result<u64, String> {
-    if room_id.trim().is_empty() {
+    let room_id = room_id.trim().to_lowercase();
+    if room_id.is_empty() {
         return Err("empty room id".into());
     }
     // 试听中进房间先停试听（避免通话时扬声器回灌）
@@ -66,6 +68,14 @@ async fn join_room(
     if let Some(h) = prev {
         h.leave().await;
     }
+    // 前端可按次覆盖信令地址（跨机联调用；空则用当前配置）
+    if let Some(url) = signaling_url {
+        let url = url.trim().to_owned();
+        if !url.is_empty() {
+            *lock(&state.signaling_url) = url;
+        }
+    }
+    let signaling_url = lock(&state.signaling_url).clone();
     let user_id = uuid::Uuid::new_v4().as_u64_pair().0;
     let mut peer_config = PeerConfig {
         stun_urls: state.stun_urls.clone(),
@@ -79,7 +89,7 @@ async fn join_room(
     let handle = Session::join(SessionConfig {
         user_id,
         room_id,
-        signaling_url: state.signaling_url.clone(),
+        signaling_url: signaling_url.clone(),
         peer_config,
         audio: AudioMode::Live { input, output },
         relay_timeout_secs: 15,
@@ -244,6 +254,23 @@ fn set_ptt_key(state: State<'_, AppState>, key: String) -> Result<String, String
     Ok(label)
 }
 
+/// 当前信令 WS 地址（前端首页回显，跨机时改成房主 IP）。
+#[tauri::command]
+fn get_signaling_url(state: State<'_, AppState>) -> String {
+    lock(&state.signaling_url).clone()
+}
+
+/// 运行时切换信令（跨机联调：两台都指向同一台房主地址，如 ws://192.168.1.10:8080/signal）。
+#[tauri::command]
+fn set_signaling_url(state: State<'_, AppState>, url: String) -> Result<String, String> {
+    let url = url.trim().to_owned();
+    if !(url.starts_with("ws://") || url.starts_with("wss://")) {
+        return Err("signaling url must start with ws:// or wss://".into());
+    }
+    *lock(&state.signaling_url) = url.clone();
+    Ok(url)
+}
+
 fn main() {
     let signaling_url =
         std::env::var("GAMEVOICE_SIGNALING_URL").unwrap_or_else(|_| DEFAULT_SIGNALING_URL.into());
@@ -272,17 +299,17 @@ fn main() {
             ptt_enabled: Mutex::new(false),
             ptt_key: Mutex::new(DEFAULT_PTT_KEY.into()),
             ptt_bind: Mutex::new(ptt::PttBind::default_v()),
-            signaling_url,
+            signaling_url: Mutex::new(signaling_url),
             stun_urls,
         })
         .setup(|app| {
             ptt::spawn(app.handle().clone());
-            // 内嵌信令：本机 8080 有.room/WS/TURN 凭证全套，开箱即用；
+            // 内嵌信令：0.0.0.0 监听，局域网另一台也能连；
             // 端口被占（比如手动跑了 signaling）就让路，用现成的。
             tauri::async_runtime::spawn(async {
-                match tokio::net::TcpListener::bind("127.0.0.1:8080").await {
+                match tokio::net::TcpListener::bind("0.0.0.0:8080").await {
                     Ok(listener) => {
-                        eprintln!("embedded signaling on 127.0.0.1:8080");
+                        eprintln!("embedded signaling on 0.0.0.0:8080 (LAN reachable)");
                         let state = std::sync::Arc::new(signaling::rooms::AppState::from_env());
                         let _ = axum::serve(listener, signaling::app(state)).await;
                     }
@@ -313,7 +340,9 @@ fn main() {
             mic_level,
             get_ptt,
             set_ptt_enabled,
-            set_ptt_key
+            set_ptt_key,
+            get_signaling_url,
+            set_signaling_url
         ])
         .run(tauri::generate_context!())
         .expect("failed to run gamevoice desktop");

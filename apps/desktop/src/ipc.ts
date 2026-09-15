@@ -11,6 +11,7 @@ export const ipc = {
     input: string | null;
     output: string | null;
     turn: TurnConfig | null;
+    signalingUrl?: string;
   }) => invoke<number>("join_room", args),
   leaveRoom: () => invoke<void>("leave_room"),
   setMuted: (muted: boolean) => invoke<void>("set_muted", { muted }),
@@ -28,6 +29,8 @@ export const ipc = {
   /** 本端 mic 实时电平 0..1（50ms 轮询，驱动律动条）。 */
   micLevel: () => invoke<number>("mic_level"),
   getPtt: () => invoke<PttState>("get_ptt"),
+  getSignalingUrl: () => invoke<string>("get_signaling_url"),
+  setSignalingUrl: (url: string) => invoke<string>("set_signaling_url", { url }),
   setPttEnabled: (enabled: boolean) =>
     invoke<void>("set_ptt_enabled", { enabled }),
   setPttKey: (key: string) => invoke<string>("set_ptt_key", { key }),

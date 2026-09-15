@@ -1,11 +1,10 @@
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useVoiceStore } from "../stores/useVoiceStore";
 import { levelIsHot, levelToPct, useMicLevel } from "../hooks/useMicLevel";
-import { MicIcon } from "./icons";
 
 /**
- * 试麦：点一下开始环回，对着话筒说话时图标跟着亮。
- * compact 用在房间设置里，默认是首页主卡片。
+ * 音频检查：紧凑的状态条（状态点 + 电平 + 操作），代替原来的大圆形试麦卡。
+ * compact 用在房间设置里。
  */
 export function MicTest({ compact = false }: { compact?: boolean }) {
   const listening = useVoiceStore((s) => s.listening);
@@ -17,7 +16,6 @@ export function MicTest({ compact = false }: { compact?: boolean }) {
   const [busy, setBusy] = useState(false);
   const { level, stale } = useMicLevel();
   const pct = levelToPct(level);
-  const hot = listening && levelIsHot(level);
   const prevDev = useRef({ inputDevice, outputDevice });
 
   useEffect(() => {
@@ -56,37 +54,30 @@ export function MicTest({ compact = false }: { compact?: boolean }) {
     }
   };
 
+  const hot = listening && levelIsHot(level);
+  const dot = stale || !listening ? "" : hot ? "ok" : "waiting";
   const status = stale
-    ? "电平无数据：重启 tauri dev"
+    ? "电平无数据：重启应用"
     : !listening
-      ? "对着话筒说几句，图标会跟着亮起来"
+      ? "检查麦克风是否正常工作"
       : hot
-        ? "听到了，话筒是好的"
-        : "正在听你说话…";
+        ? "输入正常"
+        : "正在监听，请说话";
 
   return (
     <section
-      className={compact ? "mictest compact" : "mictest"}
-      aria-label="试麦"
+      className={compact ? "audiocheck compact" : "audiocheck"}
+      aria-label="音频检查"
     >
-      <div
-        className={["orb", listening ? "live" : "", hot ? "hot" : ""].filter(Boolean).join(" ")}
-        style={{ ["--lvl"]: String(pct / 100) } as CSSProperties}
-      >
-        <span className="orb-ring" />
-        <span className="orb-ring late" />
-        <span className="orb-core">
-          <MicIcon lit={hot} level={listening ? level : 0} size={compact ? 26 : 32} />
-        </span>
-      </div>
-      <div className="mictest-body">
-        <p className="mictest-title">试麦</p>
-        <p className="mictest-status" role="status" aria-live="polite">
+      <span className={dot ? `ac-dot ${dot}` : "ac-dot"} aria-hidden="true" />
+      <div className="ac-main">
+        <p className="ac-title">音频检查</p>
+        <p className="ac-status" role="status" aria-live="polite">
           {status}
         </p>
         {listening ? (
           <span
-            className="levelbar mictest-meter"
+            className="levelbar ac-meter"
             role="meter"
             aria-label={`麦克风电平 ${pct}%`}
             aria-valuenow={pct}
@@ -99,24 +90,22 @@ export function MicTest({ compact = false }: { compact?: boolean }) {
             />
           </span>
         ) : null}
-        <button
-          type="button"
-          className={listening ? "btn btn-danger" : "btn btn-primary"}
-          onClick={() => void toggle()}
-          disabled={busy}
-          aria-pressed={listening}
-        >
-          {listening ? "停止试麦" : "开始试麦"}
-        </button>
-        {listening ? (
-          <p className="hint">戴耳机再试，否则扬声器会回灌啸叫。</p>
-        ) : null}
+        {listening ? <p className="hint">建议佩戴耳机，避免扬声器回灌。</p> : null}
         {err ? (
           <p className="hint" role="alert">
             {err}
           </p>
         ) : null}
       </div>
+      <button
+        type="button"
+        className={listening ? "btn" : "btn btn-primary"}
+        onClick={() => void toggle()}
+        disabled={busy}
+        aria-pressed={listening}
+      >
+        {listening ? "停止" : "试麦"}
+      </button>
     </section>
   );
 }

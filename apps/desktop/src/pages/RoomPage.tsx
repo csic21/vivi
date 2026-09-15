@@ -81,13 +81,17 @@ export function RoomPage({
         <StatsBar />
       </header>
       {error ? (
-        <p className="notice notice-error" role="alert" aria-live="polite">
-          {error}
-        </p>
+        <div className="room-error">
+          <p className="notice notice-error" role="alert" aria-live="polite">
+            {error}
+          </p>
+        </div>
       ) : null}
-      <MemberList />
+      <div className="room-body">
+        <MemberList />
+        {showSettings ? <SettingsPanel /> : null}
+      </div>
       <ControlsBar onLeave={() => void quit()} />
-      {showSettings ? <SettingsPanel /> : null}
     </main>
   );
 }

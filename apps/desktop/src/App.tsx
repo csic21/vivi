@@ -26,13 +26,13 @@ export function App() {
   }, []);
 
   return (
-    <>
+    <div className="app">
       <UpdaterBanner updater={updater} />
       {roomId ? (
         <RoomPage roomId={roomId} onLeave={() => setRoomId(null)} />
       ) : (
         <HomePage onJoin={setRoomId} />
       )}
-    </>
+    </div>
   );
 }

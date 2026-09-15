@@ -173,7 +173,7 @@ export function SettingsPanel() {
         </span>
         {meterStale ? (
           <span className="sub" role="status">
-            电平无数据：重启 tauri dev
+            电平无数据：重启应用
           </span>
         ) : null}
       </div>

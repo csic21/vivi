@@ -27,6 +27,10 @@ interface VoiceState {
   userId: number | null;
   busy: boolean;
   error: string | null;
+  /** 信令层最后一条错误原文（服务端 SignalMessage::Error）；由 500ms 快照轮询带回 */
+  signalError: string | null;
+  /** 建房时没能广播到局域网的原因；`null` = 广播正常或没建房 */
+  advertiseWarning: string | null;
   members: PeerStats[];
   speakingSelf: boolean;
   micLevel: number;
@@ -72,7 +76,8 @@ async function doJoin(
   if (!roomId) return;
   const rid = normalizeRoomId(roomId);
   if (rid !== roomId) set({ roomId: rid });
-  set({ busy: true, error: null });
+  // 每次（重）进房都从干净的报错状态开始，别把上一次的残留一直挂在界面上
+  set({ busy: true, error: null, signalError: null });
   try {
     // 预检 + 解析该连哪个信令：先试当前地址，不中再做一次局域网自动发现。
     // 房号错 / 找不到房主都在这步报错，不进房空等。
@@ -139,6 +144,8 @@ export const useVoiceStore = create<VoiceState>()(
   userId: null,
   busy: false,
   error: null,
+  signalError: null,
+  advertiseWarning: null,
   members: [],
   speakingSelf: false,
   micLevel: 0,
@@ -192,6 +199,7 @@ export const useVoiceStore = create<VoiceState>()(
       if (!s) return;
       const st = get();
       set({
+        signalError: s.signal_error,
         members: s.peers,
         speakingSelf: s.speaking_self,
         micLevel: s.mic_level,
@@ -217,13 +225,15 @@ export const useVoiceStore = create<VoiceState>()(
   joinCurrentRoom: () => doJoin(get, set),
   leaveRoom: async () => {
     await ipc.micLoopbackStop().catch(() => undefined);
-    // 房间在服务端是"最后一人离开即删"，所以离房 = 房间没了 = 广播也该撤。
-    // 不撤的话局域网里还会 resolve 到这台，对端白探一轮才失败。
+    // 主动离房就该撤广播：人都不在了，还让局域网 resolve 到这台，对端只会白探一轮。
+    // （服务端那边房间还会留一段宽限期，那是为了扛住"重进"的空窗，不代表这台还在。）
     await ipc.stopAdvertising().catch(() => undefined);
     await ipc.leaveRoom().catch(() => undefined);
     set({
       roomId: null,
       userId: null,
+      signalError: null,
+      advertiseWarning: null,
       members: [],
       speakingSelf: false,
       listening: false,

@@ -9,6 +9,17 @@ import { SettingsPanel } from "../components/SettingsPanel";
 import { InvitePanel } from "../components/InvitePanel";
 import { CopyIcon } from "../components/icons";
 
+/** 信令层错误原文 → 人话。认不出来就原样透出，宁可难看也别再藏。 */
+function friendlySignalError(raw: string): string {
+  if (raw.includes("room not found")) {
+    return "房主那台已经没有这个房间了（房主重开了 App，或者房号不对）。让房主重新建房再进一次。";
+  }
+  if (raw.includes("offline")) {
+    return "有队友刚断开，正在重连。一直这样的话让对方重进房间。";
+  }
+  return raw;
+}
+
 export function RoomPage({
   roomId,
   onLeave,
@@ -22,6 +33,8 @@ export function RoomPage({
   const leaveRoom = useVoiceStore((s) => s.leaveRoom);
   const applyStats = useVoiceStore((s) => s.applyStats);
   const error = useVoiceStore((s) => s.error);
+  const signalError = useVoiceStore((s) => s.signalError);
+  const advertiseWarning = useVoiceStore((s) => s.advertiseWarning);
   const showSettings = useVoiceStore((s) => s.showSettings);
   const userId = useVoiceStore((s) => s.userId);
   const [copied, setCopied] = useState(false);
@@ -91,8 +104,18 @@ export function RoomPage({
           </p>
         </div>
       ) : null}
+      {!error && signalError ? (
+        <p className="hint hint-warn" role="status" aria-live="polite">
+          {friendlySignalError(signalError)}
+        </p>
+      ) : null}
       <div className="room-body">
         <MemberList />
+        {advertiseWarning ? (
+          <p className="hint hint-warn" role="status" aria-live="polite">
+            {advertiseWarning}
+          </p>
+        ) : null}
         <InvitePanel roomId={roomId} />
         {showSettings ? <SettingsPanel updater={updater} /> : null}
       </div>

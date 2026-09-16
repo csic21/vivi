@@ -571,6 +571,7 @@ impl Session {
             last_via: HashMap::new(),
             relays_out: Arc::new(Mutex::new(HashMap::new())),
             offered_at: HashMap::new(),
+            signal_error: None,
         };
         main.spawn(sender, stats, pump);
 
@@ -647,7 +648,15 @@ struct CallMain {
     relays_out: RelayTable,
     /// source -> 首次建连时刻（自动触发计时）。
     offered_at: HashMap<u64, Instant>,
+    /// 服务端回的最后一条 `SignalMessage::Error`（附收到时刻），经快照透给 UI。
+    signal_error: Option<(String, Instant)>,
 }
+
+/// 信令错误在快照里保留多久。
+///
+/// 够用户看见，又不至于把"刚才闪了一下"一直说成"现在还是坏的"——`peer offline`
+/// 这类消息在一次 ICE 协商里出现几次是正常的，粘在界面上就成了误导。
+const SIGNAL_ERROR_TTL: Duration = Duration::from_secs(30);
 
 impl CallMain {
     fn spawn(
@@ -806,7 +815,8 @@ impl CallMain {
             }
             SignalMessage::PeerLeft { user_id } => self.remove_peer(user_id.0).await,
             SignalMessage::Error { message } => {
-                tracing::warn!(error = %message, "signaling error")
+                tracing::warn!(error = %message, "signaling error");
+                self.signal_error = Some((message, Instant::now()));
             }
             SignalMessage::JoinRoom { .. } | SignalMessage::LeaveRoom { .. } => {}
         }
@@ -1464,6 +1474,11 @@ impl CallMain {
             ns_enabled: self.audio_io.ns_on.load(Ordering::Relaxed),
             agc_enabled: self.audio_io.agc_on.load(Ordering::Relaxed),
             muted: self.muted.load(Ordering::Relaxed),
+            signal_error: self
+                .signal_error
+                .as_ref()
+                .filter(|(_, at)| at.elapsed() < SIGNAL_ERROR_TTL)
+                .map(|(msg, _)| msg.clone()),
         };
     }
 }

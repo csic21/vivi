@@ -38,4 +38,12 @@ pub struct SessionStats {
     pub agc_enabled: bool,
     /// 本端是否静音（PTT 松开/自由说话点静音都走这里）。
     pub muted: bool,
+    /// 信令层最近一条错误原文（服务端 `SignalMessage::Error`），`None` = 近段时间没出过错。
+    ///
+    /// 为什么要抬到快照里：这些错误以前只走 `tracing::warn!`，而桌面端根本没装
+    /// tracing subscriber —— "房间不存在""目标不在线"这类话等于被扔进黑洞，
+    /// 用户只能看到一个和真实原因无关的界面状态。
+    ///
+    /// 有时效（见 `session.rs` 的 `SIGNAL_ERROR_TTL`），过期就回到 `None`。
+    pub signal_error: Option<String>,
 }

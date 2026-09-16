@@ -33,6 +33,8 @@ export interface SessionStats {
   ns_enabled: boolean;
   agc_enabled: boolean;
   muted: boolean;
+  /** 信令层最后一条错误原文（服务端 SignalMessage::Error）；null = 没出过错 */
+  signal_error: string | null;
 }
 
 export interface MicTestReport {

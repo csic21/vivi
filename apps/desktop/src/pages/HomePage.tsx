@@ -89,8 +89,17 @@ export function HomePage({ onJoin, updater }: { onJoin: (roomId: string) => void
       const rid = await createRoom();
       setAutoSignalingHttp(getCreateSignalingHttp());
       // 广播出去，同一局域网的人输房号就能找到这台。
-      // 失败不阻塞建房——广播只影响"能不能被自动发现"，邀请串那条路照样通。
-      await ipc.startAdvertising(rid).catch(() => undefined);
+      // 失败不阻塞建房——广播只影响"能不能被自动发现"，邀请串那条路照样通——
+      // 但**必须让房主看见**：以前这里 `.catch(() => undefined)`，广播挂了房主
+      // 这边毫无察觉，队友却怎么也发现不到他，两边看到的是完全矛盾的现象。
+      useVoiceStore.setState({ advertiseWarning: null });
+      await ipc.startAdvertising(rid).catch((e) => {
+        useVoiceStore.setState({
+          advertiseWarning:
+            `这台机器没能在局域网上广播（${String(e)}）。` +
+            "同一个 Wi-Fi 的队友可能自动找不到这个房间，把「邀请队友」里的地址发给他。",
+        });
+      });
       await go(rid);
     } catch (e) {
       setError(String(e instanceof Error ? e.message : e));

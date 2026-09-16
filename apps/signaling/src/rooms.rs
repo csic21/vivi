@@ -313,7 +313,10 @@ mod tests {
         st.leave(&id, 1);
         backdate_empty(&st, &id, EMPTY_ROOM_GRACE);
 
-        assert!(st.join(&id, 1, outbox()).is_err(), "过了宽限期该报房间不存在");
+        assert!(
+            st.join(&id, 1, outbox()).is_err(),
+            "过了宽限期该报房间不存在"
+        );
         assert!(
             AppState::lock_read(&st.rooms).get(&id).is_none(),
             "过期房间该被写路径清扫掉"
@@ -338,7 +341,10 @@ mod tests {
         // 再走一轮完整的宽限期，仍然进得去
         st.leave(&id, 1);
         backdate_empty(&st, &id, EMPTY_ROOM_GRACE / 2);
-        assert!(st.join(&id, 1, outbox()).is_ok(), "计时没重置，宽限期被吃掉了");
+        assert!(
+            st.join(&id, 1, outbox()).is_ok(),
+            "计时没重置，宽限期被吃掉了"
+        );
     }
 
     /// 重复 leave（断连清理 + 显式离房都会走）不该把宽限期一次次往后延。

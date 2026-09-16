@@ -210,6 +210,44 @@ async fn signaling_should_route_room_messages() {
     assert!(!v["credential"].as_str().unwrap().is_empty());
 }
 
+/// 房主在房间里换音频设备时，客户端是 `leave → join`（`rejoin`），中间有一段
+/// 谁都不在的空窗。以前这段空窗会把房间直接删掉，而房主的 mDNS 广播还挂着，
+/// 队友因此"发现得到这台机器、却找不到房间"，报错还会说成"房号打错了"。
+#[tokio::test]
+async fn room_should_survive_host_rejoin() {
+    let addr = spawn_server().await;
+    let room = post_room(addr).await;
+
+    let mut host = ws_connect(addr).await;
+    ws_send(&mut host, &join(&room, 1)).await;
+    // 换设备：旧会话整个拆掉（Rust 侧 `join_room` 也是先 leave 再 join）
+    drop(host);
+
+    let info = http_roundtrip(
+        addr,
+        &format!("GET /rooms/{room} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n"),
+    )
+    .await;
+    assert!(
+        info.starts_with("HTTP/1.1 200"),
+        "重进空窗里房间不该消失：{info}"
+    );
+
+    // 房主重进：客户端每次 join_room 都会重新生成 user_id，所以这里换个号
+    let mut host2 = ws_connect(addr).await;
+    ws_send(&mut host2, &join(&room, 11)).await;
+
+    let info = http_roundtrip(
+        addr,
+        &format!("GET /rooms/{room} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n"),
+    )
+    .await;
+    assert!(
+        body_of(&info).contains("11"),
+        "房主重进后该在成员表里：{info}"
+    );
+}
+
 #[tokio::test]
 async fn signaling_should_reject_bad_input() {
     let addr = spawn_server().await;

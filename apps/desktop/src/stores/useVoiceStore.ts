@@ -7,7 +7,7 @@ import {
   fetchTurnCreds,
   normalizeRoomId,
 } from "../api/signaling";
-import type { PeerStats } from "../types";
+import type { NatInfo, PeerStats } from "../types";
 
 /** 旧版 GameVoice 存的偏好 key，首次启动迁移到 "vivi"，避免重命名后偏好丢失。 */
 try {
@@ -47,7 +47,18 @@ interface VoiceState {
   outputDevice: string | null;
   showSettings: boolean;
   listening: boolean;
+  /**
+   * 这次会话是「手动连接」起来的（不经过房间和信令服务器）。
+   * RoomPage 据此跳过入会 —— 否则它一挂载就会去连房间，把手动链路的会话顶掉。
+   */
+  manualMode: boolean;
+  /** 本机 NAT 判定结果；null = 还没探过 */
+  natKind: NatInfo | null;
+  natProbing: boolean;
 
+  setManualMode: (v: boolean) => void;
+  /** 探一次本机 NAT（有缓存：要联网问 STUN，不该每次开面板都等一轮）。 */
+  probeNat: () => Promise<NatInfo | null>;
   setRoomInput: (id: string | null) => void;
   setError: (e: string | null) => void;
   setMuted: (m: boolean) => void;
@@ -76,8 +87,9 @@ async function doJoin(
   if (!roomId) return;
   const rid = normalizeRoomId(roomId);
   if (rid !== roomId) set({ roomId: rid });
-  // 每次（重）进房都从干净的报错状态开始，别把上一次的残留一直挂在界面上
-  set({ busy: true, error: null, signalError: null });
+  // 每次（重）进房都从干净的报错状态开始，别把上一次的残留一直挂在界面上。
+  // manualMode 一并清掉：走房间模式就意味着放弃手动连接那条链路。
+  set({ busy: true, error: null, signalError: null, manualMode: false });
   try {
     // 预检 + 解析该连哪个信令：先试当前地址，不中再做一次局域网自动发现。
     // 房号错 / 找不到房主都在这步报错，不进房空等。
@@ -162,6 +174,27 @@ export const useVoiceStore = create<VoiceState>()(
   outputDevice: null,
   showSettings: false,
   listening: false,
+  manualMode: false,
+  natKind: null,
+  natProbing: false,
+
+  setManualMode: (manualMode) => set({ manualMode }),
+
+  probeNat: async () => {
+    const cached = get().natKind;
+    if (cached) return cached;
+    if (get().natProbing) return null; // 已有一次在飞，别叠着探
+    set({ natProbing: true });
+    try {
+      const info = await ipc.probeNat();
+      set({ natKind: info, natProbing: false });
+      return info;
+    } catch {
+      // 探不出来不是错：判不出 ≠ 打不通，静默跳过，别拿它吓用户
+      set({ natProbing: false });
+      return null;
+    }
+  },
 
   setRoomInput: (roomId) => set({ roomId }),
   setError: (error) => set({ error }),
@@ -234,6 +267,7 @@ export const useVoiceStore = create<VoiceState>()(
       userId: null,
       signalError: null,
       advertiseWarning: null,
+      manualMode: false,
       members: [],
       speakingSelf: false,
       listening: false,

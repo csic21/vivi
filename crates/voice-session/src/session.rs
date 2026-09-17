@@ -28,8 +28,9 @@ use voice_core::dsp::{DspChain, EnergyVad, Vad};
 use voice_core::jitter::{AdaptiveJitterBuffer, JitterConfig, Plucked};
 use voice_core::mixer::Mixer;
 use voice_protocol::{decode_view, SignalMessage, VoicePacket, MAX_UDP_DATAGRAM};
-use voice_webrtc::{PeerConfig, PeerState, RemoteFrame, VoicePeer};
+use voice_webrtc::{PeerConfig, PeerState, RTCIceGatheringState, RemoteFrame, VoicePeer};
 
+use super::manual::{ManualEvent, ManualLink};
 use super::signaling_client::{connect as sig_connect, SigSender};
 use super::stats::{PeerStats, SessionStats};
 
@@ -44,11 +45,25 @@ pub enum AudioMode {
     Synthetic,
 }
 
+/// 信令通道。
+///
+/// 房间模式（`Server`）要求两端连同一个信令进程；异地时"那个进程在哪"没法自动
+/// 解决，`Manual` 就是为此存在的旁路：一个字节都不经过服务器。
+#[derive(Debug, Clone)]
+pub enum Signaling {
+    /// 连 WS 信令服务器，如 `ws://127.0.0.1:8080/signal`。
+    Server { url: String },
+    /// 手动（剪贴板）打洞，见 [`crate::manual`]。
+    ///
+    /// `peer_id` 是对端预置 id；与 `user_id` 比大小决定谁发 offer
+    /// （沿用房间模式的确定性规则，小的一方发）。
+    Manual { peer_id: u64 },
+}
+
 pub struct SessionConfig {
     pub user_id: u64,
     pub room_id: String,
-    /// 如 `ws://127.0.0.1:8080/signal`。
-    pub signaling_url: String,
+    pub signaling: Signaling,
     /// STUN/TURN（TURN 凭证调用方提前从信令拿好填入）。
     pub peer_config: PeerConfig,
     pub audio: AudioMode,
@@ -280,6 +295,24 @@ pub struct Session;
 impl Session {
     /// 入会：连信令 → 起音频 → 发 JoinRoom，立即返回句柄，对端陆续接入。
     pub async fn join(config: SessionConfig) -> anyhow::Result<SessionHandle> {
+        Ok(Self::join_inner(config).await?.0)
+    }
+
+    /// 手动打洞入会：不连信令服务器，额外返回手工信令通道
+    /// （出站攒连接码 / 入站喂对端连接码，见 [`crate::manual`]）。
+    ///
+    /// `config.signaling` 必须是 [`Signaling::Manual`]。
+    pub async fn join_manual(config: SessionConfig) -> anyhow::Result<(SessionHandle, ManualLink)> {
+        let (handle, manual) = Self::join_inner(config).await?;
+        let link = manual.ok_or_else(|| {
+            anyhow::anyhow!("join_manual 需要 Signaling::Manual；房间模式请用 Session::join")
+        })?;
+        Ok((handle, link))
+    }
+
+    async fn join_inner(
+        config: SessionConfig,
+    ) -> anyhow::Result<(SessionHandle, Option<ManualLink>)> {
         let me = config.user_id;
         let room = config.room_id.clone();
         let relay_timeout = config.relay_timeout();
@@ -287,7 +320,39 @@ impl Session {
             Arc::new(Mutex::new(config.no_direct.iter().copied().collect()));
         let peer_config = Arc::new(config.peer_config);
 
-        let (sig_tx, sig_rx, sig_tasks) = sig_connect(&config.signaling_url).await?;
+        let (sig_tx, sig_rx, sig_tasks, manual, manual_out) = match config.signaling {
+            Signaling::Server { ref url } => {
+                let (tx, rx, tasks) = sig_connect(url).await?;
+                (tx, rx, tasks, None, None)
+            }
+            Signaling::Manual { peer_id } => {
+                // 手动模式：不连任何东西。主任务照旧往 `SigSender` 里吐信令，
+                // 这里用一条桥把它转成 `ManualEvent` 交给调用方；
+                // 反向的入站信令由 `ManualLink::feed` 注入 `sig_rx`。
+                let (raw_tx, mut raw_rx) = mpsc::unbounded_channel::<SignalMessage>();
+                let (in_tx, in_rx) = mpsc::channel::<SignalMessage>(64);
+                let (ev_tx, ev_rx) = mpsc::unbounded_channel::<ManualEvent>();
+                // 桥持有一份发普通信令；主任务另持一份发 gathering 完成事件。
+                let ev_from_main = ev_tx.clone();
+                let bridge = tokio::spawn(async move {
+                    while let Some(m) = raw_rx.recv().await {
+                        if ev_tx.send(ManualEvent::Signal(m)).is_err() {
+                            break;
+                        }
+                    }
+                });
+                (
+                    SigSender::from_channel(raw_tx),
+                    in_rx,
+                    vec![bridge],
+                    Some(ManualLink::new(ev_rx, in_tx)),
+                    Some(ManualOut {
+                        events: ev_from_main,
+                        peer_id,
+                    }),
+                )
+            }
+        };
         let peers: Arc<Mutex<HashMap<u64, Arc<Slot>>>> = Arc::new(Mutex::new(HashMap::new()));
         let gains: Arc<Mutex<HashMap<u64, f32>>> = Arc::new(Mutex::new(HashMap::new()));
         let media: Arc<Mutex<HashMap<u64, MediaCache>>> = Arc::new(Mutex::new(HashMap::new()));
@@ -572,18 +637,29 @@ impl Session {
             relays_out: Arc::new(Mutex::new(HashMap::new())),
             offered_at: HashMap::new(),
             signal_error: None,
+            manual: manual_out,
         };
         main.spawn(sender, stats, pump);
 
         // 入会宣告（新人等 PeerJoined；老人按 id 规则决定是否 offer，见模块文档）
         // 注意：handle 先返回，JoinRoom 在主任务启动后立刻发出
-        Ok(SessionHandle {
-            control: control_tx,
-            snapshot,
-            blocklist: Arc::clone(&blocklist),
-            audio_io: Arc::clone(&audio_io),
-        })
+        Ok((
+            SessionHandle {
+                control: control_tx,
+                snapshot,
+                blocklist: Arc::clone(&blocklist),
+                audio_io: Arc::clone(&audio_io),
+            },
+            manual,
+        ))
     }
+}
+
+/// 手动打洞模式下主任务要往哪儿吐事件（房间模式恒为 `None`）。
+struct ManualOut {
+    events: mpsc::UnboundedSender<ManualEvent>,
+    /// 对端预置 id；没有服务器广播"人到了"，只能开工时直接合成一条 PeerJoined。
+    peer_id: u64,
 }
 
 /// 主任务体（单任务串行：无数据竞争；JB 例外，用短 Mutex 跨收包/tick 共享）。
@@ -650,6 +726,8 @@ struct CallMain {
     offered_at: HashMap<u64, Instant>,
     /// 服务端回的最后一条 `SignalMessage::Error`（附收到时刻），经快照透给 UI。
     signal_error: Option<(String, Instant)>,
+    /// 手动打洞的出站通道（房间模式为 `None`）。
+    manual: Option<ManualOut>,
 }
 
 /// 信令错误在快照里保留多久。
@@ -669,10 +747,20 @@ impl CallMain {
         self.tasks.push(stats);
         tokio::spawn(async move {
             // 先宣告入会，再进循环
-            self.sig.send(SignalMessage::JoinRoom {
-                room_id: self.room.clone(),
-                user_id: UserId(self.me),
-            });
+            match self.manual.as_ref().map(|m| m.peer_id) {
+                None => self.sig.send(SignalMessage::JoinRoom {
+                    room_id: self.room.clone(),
+                    user_id: UserId(self.me),
+                }),
+                // 手动模式没有服务器替我们广播"人到了"，直接合成一条。
+                // 这样 id 规则（小者发 offer）在两种模式下是同一条代码路径。
+                Some(peer_id) => {
+                    self.on_signal(SignalMessage::PeerJoined {
+                        user_id: UserId(peer_id),
+                    })
+                    .await;
+                }
+            }
             loop {
                 tokio::select! {
                     Some(msg) = self.sig_rx.recv() => self.on_signal(msg).await,
@@ -1028,17 +1116,46 @@ impl CallMain {
             speaking: AtomicBool::new(false),
         });
 
-        // 本地 candidate → 信令
+        // 本地 candidate → 信令（手动模式改成往 ManualEvent 里放，由调用方攒进连接码）
         let sig = self.sig.clone();
+        let manual_ev = self.manual.as_ref().map(|m| m.events.clone());
         let me = self.me;
+        self.tasks.push(tokio::spawn({
+            let manual_ev = manual_ev.clone();
+            async move {
+                let mut rx = ev.local_candidates;
+                while let Some(c) = rx.recv().await {
+                    let msg = SignalMessage::IceCandidate {
+                        from: UserId(me),
+                        to: UserId(user),
+                        candidate: c,
+                    };
+                    match &manual_ev {
+                        Some(ev) => {
+                            if ev.send(ManualEvent::Signal(msg)).is_err() {
+                                break;
+                            }
+                        }
+                        None => sig.send(msg),
+                    }
+                }
+            }
+        }));
+        // gathering 完成 → 手动模式下通知调用方"候选收齐，可以出码了"。
+        // 房间模式走 trickle，不需要这个信号，但任务照样收干净免得通道积压。
         self.tasks.push(tokio::spawn(async move {
-            let mut rx = ev.local_candidates;
-            while let Some(c) = rx.recv().await {
-                sig.send(SignalMessage::IceCandidate {
-                    from: UserId(me),
-                    to: UserId(user),
-                    candidate: c,
-                });
+            let mut rx = ev.gathering;
+            while let Some(state) = rx.recv().await {
+                if state == RTCIceGatheringState::Complete {
+                    match &manual_ev {
+                        Some(ev) => {
+                            if ev.send(ManualEvent::GatheringComplete).is_err() {
+                                break;
+                            }
+                        }
+                        None => break,
+                    }
+                }
             }
         }));
         // 远端帧 → 该对端 JB（+ 中继分发：有人订阅此源就同步一份）

@@ -14,6 +14,11 @@ pub struct SigSender {
 }
 
 impl SigSender {
+    /// 手动打洞模式用：发送端不接 WS，而是接本地通道（见 `session::Signaling::Manual`）。
+    pub(crate) fn from_channel(tx: mpsc::UnboundedSender<SignalMessage>) -> Self {
+        Self { tx }
+    }
+
     pub fn send(&self, msg: SignalMessage) {
         let _ = self.tx.send(msg);
     }

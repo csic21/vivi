@@ -102,3 +102,26 @@ export interface InviteInfo {
   /** 出口在运营商大内网，端口映射也救不了 */
   cgnat: boolean;
 }
+
+// ---------- 手动连接（无需服务器，见 docs/NETWORK.md 第 3 节） ----------
+
+/** 手动连接一端产出的连接码。 */
+export interface ManualCode {
+  /** 这段码本身，展示 + 复制用 */
+  code: string;
+  /** 候选摘要，如 `候选 host=3 srflx=1 relay=0` */
+  candidates: string;
+  /** 有没有能穿 NAT 的候选。false = 出了局域网就没用 */
+  crosses_nat: boolean;
+  /** 候选收齐了没有。false = 超时截断，多半得重来一次 */
+  reliable: boolean;
+}
+
+/** 本机 NAT 类型判定：打洞这条路值不值得走。 */
+export interface NatInfo {
+  kind: "cone" | "symmetric" | "unknown";
+  /** 一句人话，直接展示 */
+  detail: string;
+  /** 打洞还有没有戏 */
+  punching_may_work: boolean;
+}

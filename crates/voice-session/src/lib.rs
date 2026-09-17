@@ -7,9 +7,13 @@
 //! ```
 //! 单 tick 任务串行处理全部对端；JB 用短临界区 Mutex 在收包/pump 间共享。
 
+pub mod manual;
+pub mod nat;
 pub mod session;
 pub mod signaling_client;
 pub mod stats;
 
-pub use session::{AudioMode, AudioSettings, Session, SessionConfig, SessionHandle};
+pub use manual::{CandidateSummary, GatherOutcome, ManualEvent, ManualLink};
+pub use nat::NatKind;
+pub use session::{AudioMode, AudioSettings, Session, SessionConfig, SessionHandle, Signaling};
 pub use stats::{PeerStats, SessionStats};

@@ -13,7 +13,11 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use serde::{Deserialize, Serialize};
 use tauri::{Manager, State};
 use voice_common::DeviceInfo;
-use voice_session::{AudioMode, Session, SessionConfig, SessionHandle, SessionStats};
+use voice_session::manual::{summarize_code, DEFAULT_GATHER_TIMEOUT};
+use voice_session::{
+    nat, AudioMode, ManualLink, NatKind, Session, SessionConfig, SessionHandle, SessionStats,
+    Signaling,
+};
 use voice_webrtc::PeerConfig;
 
 const DEFAULT_SIGNALING_URL: &str = "ws://127.0.0.1:8080/signal";
@@ -39,6 +43,9 @@ struct EmbeddedSignaling {
 
 struct AppState {
     session: Mutex<Option<SessionHandle>>,
+    /// 手动连接的信令通道（房间模式恒为 `None`）。
+    /// 会话结束后仍要留着它：房主出完码还得等队友把回答码粘回来。
+    manual: Mutex<Option<ManualLink>>,
     loopback: Mutex<Option<voice_core::audio::LoopbackHandle>>,
     ptt_enabled: Mutex<bool>,
     ptt_key: Mutex<String>,
@@ -89,6 +96,8 @@ async fn join_room(
     }
     // 试听中进房间先停试听（避免通话时扬声器回灌）
     lock(&state.loopback).take();
+    // 走房间模式就意味着放弃手动连接那条链路
+    lock(&state.manual).take();
     // 已在房间则先退（换设备重进也走这条路）
     let prev = lock(&state.session).take();
     if let Some(h) = prev {
@@ -115,7 +124,9 @@ async fn join_room(
     let handle = Session::join(SessionConfig {
         user_id,
         room_id,
-        signaling_url: signaling_url.clone(),
+        signaling: Signaling::Server {
+            url: signaling_url.clone(),
+        },
         peer_config,
         audio: AudioMode::Live { input, output },
         relay_timeout_secs: 15,
@@ -134,11 +145,162 @@ async fn join_room(
 #[tauri::command]
 async fn leave_room(state: State<'_, AppState>) -> Result<(), String> {
     lock(&state.loopback).take();
+    lock(&state.manual).take();
     let prev = lock(&state.session).take();
     if let Some(h) = prev {
         h.leave().await;
     }
     Ok(())
+}
+
+// ---------- 手动连接（无需服务器）----------
+//
+// 异地没有信令服务器时，两台机器之间没有任何途径能互相发现（NAT 的性质，
+// 见 docs/NETWORK.md 第 3 节）。但两人局真正要交换的只有两段几百字节的文本，
+// 那就让人在微信里搬一次。这里只做"起会话 / 出码 / 吃码"，协议在 voice-session。
+
+/// 手动连接一端的产物。
+#[derive(Debug, Serialize)]
+struct ManualCode {
+    /// 这段码本身，展示 + 复制用
+    code: String,
+    /// 候选摘要（如 `候选 host=3 srflx=1 relay=0`），直接展示
+    candidates: String,
+    /// 有没有能穿 NAT 的候选。`false` = 出了局域网就没用，得先解决 STUN
+    crosses_nat: bool,
+    /// 候选收齐了没有。`false` = 超时截断，多半得重来一次
+    reliable: bool,
+}
+
+/// 本机 NAT 判定 —— 对称型就别让用户再折腾打洞了。
+#[derive(Debug, Serialize)]
+struct NatInfo {
+    /// `cone` / `symmetric` / `unknown`
+    kind: String,
+    /// 一句人话，直接展示
+    detail: String,
+    /// 打洞还有没有戏
+    punching_may_work: bool,
+}
+
+/// 手动连接的角色 id。沿用房间模式的确定性规则：**id 小的一方发 offer**。
+const MANUAL_HOST_ID: u64 = 1;
+const MANUAL_GUEST_ID: u64 = 2;
+
+/// 起一个不连任何信令服务器的手动会话。
+async fn start_manual(
+    state: &AppState,
+    me: u64,
+    peer: u64,
+    input: Option<String>,
+    output: Option<String>,
+) -> Result<(SessionHandle, ManualLink), String> {
+    // 重来一遍时先拆掉旧的（换设备重连也走这条路）。
+    // 注意先 take 到局部变量再 await：`if let Some(h) = lock(..).take()` 里那个
+    // 临时 guard 会活过 await，而 MutexGuard 不是 Send，命令就不满足 Tauri 的约束。
+    lock(&state.loopback).take();
+    lock(&state.manual).take();
+    let prev = lock(&state.session).take();
+    if let Some(h) = prev {
+        h.leave().await;
+    }
+    let peer_config = PeerConfig {
+        stun_urls: state.stun_urls.clone(),
+        ..PeerConfig::default()
+    };
+    Session::join_manual(SessionConfig {
+        user_id: me,
+        room_id: String::new(),
+        signaling: Signaling::Manual { peer_id: peer },
+        peer_config,
+        audio: AudioMode::Live { input, output },
+        relay_timeout_secs: 15,
+        no_direct: vec![],
+    })
+    .await
+    .map_err(|e| format!("{e:#}"))
+}
+
+fn to_manual_code(code: String, reliable: bool) -> Result<ManualCode, String> {
+    let s = summarize_code(&code).map_err(|e| format!("{e:#}"))?;
+    Ok(ManualCode {
+        candidates: s.describe(),
+        crosses_nat: s.can_cross_nat(),
+        reliable,
+        code,
+    })
+}
+
+/// 房主：起会话并出第一段连接码。之后拿 `manual_host_finish` 把对方的码粘回来。
+#[tauri::command]
+async fn manual_host_start(
+    state: State<'_, AppState>,
+    input: Option<String>,
+    output: Option<String>,
+) -> Result<ManualCode, String> {
+    let (handle, mut link) =
+        start_manual(state.inner(), MANUAL_HOST_ID, MANUAL_GUEST_ID, input, output).await?;
+    *lock(&state.session) = Some(handle);
+    let (code, outcome) = link
+        .next_code(DEFAULT_GATHER_TIMEOUT)
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    // 链接留着：队友的回答码还没回来
+    *lock(&state.manual) = Some(link);
+    to_manual_code(code, outcome.is_usable())
+}
+
+/// 队友：吃进房主的码，出自己的码。对方再粘一次就通了。
+#[tauri::command]
+async fn manual_guest_accept(
+    state: State<'_, AppState>,
+    host_code: String,
+    input: Option<String>,
+    output: Option<String>,
+) -> Result<ManualCode, String> {
+    let (handle, mut link) =
+        start_manual(state.inner(), MANUAL_GUEST_ID, MANUAL_HOST_ID, input, output).await?;
+    *lock(&state.session) = Some(handle);
+    link.feed(&host_code)
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    let (code, outcome) = link
+        .next_code(DEFAULT_GATHER_TIMEOUT)
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    *lock(&state.manual) = Some(link);
+    to_manual_code(code, outcome.is_usable())
+}
+
+/// 房主：把队友的回答码粘回来，ICE 随即开跑。
+#[tauri::command]
+async fn manual_host_finish(state: State<'_, AppState>, guest_code: String) -> Result<(), String> {
+    let link = lock(&state.manual)
+        .take()
+        .ok_or("没有正在等待的手动连接（会话可能已经结束）")?;
+    let fed = link
+        .feed(&guest_code)
+        .await
+        .map(|_| ())
+        .map_err(|e| format!("{e:#}"));
+    *lock(&state.manual) = Some(link);
+    fed
+}
+
+/// 本机 NAT 判定。会联网问几台 STUN，只在用户主动点开相关面板时调用。
+#[tauri::command]
+async fn probe_nat(state: State<'_, AppState>) -> Result<NatInfo, String> {
+    let kind = nat::classify(&state.stun_urls, nat::PER_SERVER).await;
+    Ok(NatInfo {
+        kind: match &kind {
+            NatKind::Cone { .. } => "cone",
+            NatKind::Symmetric { .. } => "symmetric",
+            NatKind::Unknown { .. } => "unknown",
+        }
+        .into(),
+        detail: kind.to_string(),
+        punching_may_work: kind.punching_may_work(),
+    })
 }
 
 #[tauri::command]
@@ -502,6 +664,7 @@ fn main() {
     tauri::Builder::default()
         .manage(AppState {
             session: Mutex::new(None),
+            manual: Mutex::new(None),
             loopback: Mutex::new(None),
             ptt_enabled: Mutex::new(false),
             ptt_key: Mutex::new(DEFAULT_PTT_KEY.into()),
@@ -538,6 +701,10 @@ fn main() {
             default_audio_devices,
             join_room,
             leave_room,
+            manual_host_start,
+            manual_guest_accept,
+            manual_host_finish,
+            probe_nat,
             set_muted,
             set_deafened,
             set_user_gain,

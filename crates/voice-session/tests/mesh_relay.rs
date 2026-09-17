@@ -6,14 +6,16 @@ use std::time::Duration;
 
 use signaling::rooms::{create_room_now, AppState};
 use tokio::net::TcpListener;
-use voice_session::{AudioMode, Session, SessionConfig};
+use voice_session::{AudioMode, Session, SessionConfig, Signaling};
 use voice_webrtc::PeerConfig;
 
 fn test_config(user: u64, room: &str, url: &str, no_direct: Vec<u64>) -> SessionConfig {
     SessionConfig {
         user_id: user,
         room_id: room.to_owned(),
-        signaling_url: url.to_owned(),
+        signaling: Signaling::Server {
+            url: url.to_owned(),
+        },
         peer_config: PeerConfig {
             stun_urls: vec![],
             ..PeerConfig::default()

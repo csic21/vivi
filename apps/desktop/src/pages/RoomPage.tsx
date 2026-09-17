@@ -37,20 +37,26 @@ export function RoomPage({
   const advertiseWarning = useVoiceStore((s) => s.advertiseWarning);
   const showSettings = useVoiceStore((s) => s.showSettings);
   const userId = useVoiceStore((s) => s.userId);
+  const manualMode = useVoiceStore((s) => s.manualMode);
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     let alive = true;
-    void joinCurrentRoom()
-      .then(() => {
-        // 入会后把记住的音频偏好推给新会话（后端会话是全新的，默认全开）
-        const st = useVoiceStore.getState();
-        void ipc.setMicGain(st.micGain);
-        void ipc.setSpeakerGain(st.speakerGain);
-        void ipc.setNsEnabled(st.nsEnabled);
-        void ipc.setAgcEnabled(st.agcEnabled);
-      })
-      .catch(() => undefined);
+    // 入会后把记住的音频偏好推给这个新会话（后端会话是全新的，默认全开）
+    const pushPrefs = () => {
+      const st = useVoiceStore.getState();
+      void ipc.setMicGain(st.micGain);
+      void ipc.setSpeakerGain(st.speakerGain);
+      void ipc.setNsEnabled(st.nsEnabled);
+      void ipc.setAgcEnabled(st.agcEnabled);
+    };
+    if (manualMode) {
+      // 手动连接的会话在首页就建好了。这里**绝不能**再走 joinCurrentRoom ——
+      // 那会拿房间模式的配置重建会话，把刚接上的那条点对点链路整个顶掉。
+      pushPrefs();
+    } else {
+      void joinCurrentRoom().then(pushPrefs).catch(() => undefined);
+    }
     const timer = setInterval(() => {
       if (alive) applyStats();
     }, 500);
@@ -81,19 +87,30 @@ export function RoomPage({
     <main className="shell">
       <header className="roomhead">
         <div>
-          <h2>
-            <span className="roomid">{roomId}</span>
-            <button
-              type="button"
-              className="btn btn-ghost"
-              onClick={() => void copyRoom()}
-              title="复制房间号发给队友"
-            >
-              <CopyIcon />
-              {copied ? "已复制" : "复制"}
-            </button>
-          </h2>
-          <span className="self">你在 {userId ?? "连接中"} 号位</span>
+          {manualMode ? (
+            <>
+              <h2>
+                <span className="roomid">手动连接</span>
+              </h2>
+              <span className="self">点对点直连 · 不经过任何服务器</span>
+            </>
+          ) : (
+            <>
+              <h2>
+                <span className="roomid">{roomId}</span>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => void copyRoom()}
+                  title="复制房间号发给队友"
+                >
+                  <CopyIcon />
+                  {copied ? "已复制" : "复制"}
+                </button>
+              </h2>
+              <span className="self">你在 {userId ?? "连接中"} 号位</span>
+            </>
+          )}
         </div>
         <StatsBar />
       </header>
@@ -116,7 +133,8 @@ export function RoomPage({
             {advertiseWarning}
           </p>
         ) : null}
-        <InvitePanel roomId={roomId} />
+        {/* 手动连接没有房间可邀请（人也已经在了），邀请面板在这里只会误导 */}
+        {manualMode ? null : <InvitePanel roomId={roomId} />}
         {showSettings ? <SettingsPanel updater={updater} /> : null}
       </div>
       <ControlsBar onLeave={() => void quit()} />

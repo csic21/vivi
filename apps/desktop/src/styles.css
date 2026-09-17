@@ -991,3 +991,81 @@ select {
   border-color: rgba(63, 185, 127, 0.45);
   color: #a9e2c6;
 }
+
+/* ---------- 手动连接（无需服务器） ---------- */
+
+.manual-toggle {
+  width: 100%;
+}
+
+.manual-detail {
+  margin-top: 10px;
+}
+
+.manual-roles {
+  display: flex;
+  gap: 8px;
+  margin: 12px 0 4px;
+}
+
+.manual-roles .btn {
+  flex: 1;
+}
+
+.manual-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+/* 步骤头：小圆号 + 标题，把"先干嘛再干嘛"摆明，省得用户对着两个输入框发愣 */
+.manual-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.manual-step-no {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  color: var(--fog);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  text-align: center;
+}
+
+.manual-step-title {
+  font-size: 13px;
+  color: var(--paper);
+}
+
+/* 连接码近千字符，等宽 + 可换行 + 限高滚动：不能让它把面板顶穿 */
+.manual-code {
+  display: block;
+  max-height: 120px;
+  overflow-y: auto;
+  padding: 8px 10px;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--go);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.manual-input {
+  width: 100%;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+}

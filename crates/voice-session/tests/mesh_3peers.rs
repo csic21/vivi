@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use signaling::rooms::{create_room_now, AppState};
 use tokio::net::TcpListener;
-use voice_session::{AudioMode, Session, SessionConfig};
+use voice_session::{AudioMode, Session, SessionConfig, Signaling};
 use voice_webrtc::PeerConfig;
 
 async fn wait_full_mesh(
@@ -58,7 +58,7 @@ async fn mesh_should_connect_mix_and_cleanup() {
             Session::join(SessionConfig {
                 user_id: user,
                 room_id: room.clone(),
-                signaling_url: url.clone(),
+                signaling: Signaling::Server { url: url.clone() },
                 peer_config: peer_config.clone(),
                 audio: AudioMode::Synthetic,
                 relay_timeout_secs: 15,

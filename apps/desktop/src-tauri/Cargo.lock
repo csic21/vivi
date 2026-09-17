@@ -4981,7 +4981,7 @@ dependencies = [
 
 [[package]]
 name = "signaling"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -6282,7 +6282,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vivi-desktop"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "axum",
  "device_query",
@@ -6306,7 +6306,7 @@ dependencies = [
 
 [[package]]
 name = "voice-common"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "serde",
  "thiserror 2.0.20",
@@ -6314,7 +6314,7 @@ dependencies = [
 
 [[package]]
 name = "voice-core"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "cpal",
@@ -6331,7 +6331,7 @@ dependencies = [
 
 [[package]]
 name = "voice-protocol"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -6340,9 +6340,11 @@ dependencies = [
 
 [[package]]
 name = "voice-session"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
+ "flate2",
  "futures-util",
  "ringbuf",
  "serde",
@@ -6358,7 +6360,7 @@ dependencies = [
 
 [[package]]
 name = "voice-webrtc"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "async-trait",

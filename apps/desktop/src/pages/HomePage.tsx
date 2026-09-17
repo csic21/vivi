@@ -17,6 +17,7 @@ import {
 import { ipc } from "../ipc";
 import { MicTest } from "../components/MicTest";
 import { SignalingPanel } from "../components/SignalingPanel";
+import { MANUAL_ROOM_LABEL, ManualPanel } from "../components/ManualPanel";
 
 export function HomePage({ onJoin, updater }: { onJoin: (roomId: string) => void; updater?: UpdaterState }) {
   const [input, setInput] = useState("");
@@ -178,6 +179,9 @@ export function HomePage({ onJoin, updater }: { onJoin: (roomId: string) => void
         </div>
       ) : null}
       <div className="home-body">
+        {/* 手动连接摆在试麦和高级设置之前：跨网络连不上是这类工具最高频的挫败点，
+            不该让人翻到"高级"里才找得到出路。 */}
+        <ManualPanel onConnected={() => onJoin(MANUAL_ROOM_LABEL)} />
         <MicTest />
         <SignalingPanel busy={busy} onError={setError} />
         <fieldset className="panel">

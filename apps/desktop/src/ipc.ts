@@ -5,6 +5,8 @@ import type {
   DiscoveredServer,
   DiscoveryResult,
   InviteInfo,
+  ManualCode,
+  NatInfo,
   PttState,
   SessionStats,
   SignalingStatus,
@@ -58,6 +60,23 @@ export const ipc = {
   stopAdvertising: () => invoke<void>("stop_advertising"),
   /** 取生成邀请所需的候选地址（会做一次 STUN 探测）。 */
   buildInvite: (roomId: string) => invoke<InviteInfo>("build_invite", { roomId }),
+
+  // ---------- 手动连接（不连任何信令服务器） ----------
+
+  /** 房主：起会话并出第一段连接码。 */
+  manualHostStart: (args: { input: string | null; output: string | null }) =>
+    invoke<ManualCode>("manual_host_start", args),
+  /** 队友：吃进房主的码，出自己那段。 */
+  manualGuestAccept: (args: {
+    hostCode: string;
+    input: string | null;
+    output: string | null;
+  }) => invoke<ManualCode>("manual_guest_accept", args),
+  /** 房主：把队友的回答码粘回来，接上。 */
+  manualHostFinish: (guestCode: string) =>
+    invoke<void>("manual_host_finish", { guestCode }),
+  /** 本机 NAT 判定（会联网问几台 STUN，只在用户点开面板时调）。 */
+  probeNat: () => invoke<NatInfo>("probe_nat"),
 };
 
 export type { DiscoveredServer, DiscoveryResult, InviteInfo, SignalingStatus };

@@ -26,10 +26,13 @@ use rtc::rtp_transceiver::rtp_sender::{
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use voice_common::{RouteType, VoiceError};
+
 use webrtc::data_channel::{DataChannel, DataChannelEvent, RTCDataChannelInit};
 use webrtc::media_stream::track_local::static_sample::TrackLocalStaticSample;
 use webrtc::media_stream::track_local::TrackLocal;
 use webrtc::media_stream::track_remote::{TrackRemote, TrackRemoteEvent};
+/// gathering 状态由上层（`voice-session`）判读，所以从这里透出去。
+pub use webrtc::peer_connection::RTCIceGatheringState;
 use webrtc::peer_connection::{
     PeerConnection, PeerConnectionBuilder, PeerConnectionEventHandler, RTCConfigurationBuilder,
     RTCIceCandidateInit, RTCIceCandidateType, RTCIceServer, RTCIceTransportPolicy,
@@ -144,6 +147,13 @@ pub struct PeerEvents {
     pub relay_frames: mpsc::Receiver<Vec<u8>>,
     /// 连接状态变化。
     pub states: mpsc::Receiver<PeerState>,
+    /// ICE gathering 状态变化。`Complete` = 本端候选已收齐，此刻的
+    /// `local_description()` 才含全部 `a=candidate:` 行——非 trickle 交换的前提。
+    ///
+    /// 注意 webrtc-rs 的「候选结束」**不走 `on_ice_candidate`**（空候选在
+    /// `rtc::peer_connection::add_local_candidate` 里被拦下，只改 gathering 状态、
+    /// 只发 `OnIceGatheringStateChangeEvent`），所以想看"收齐没有"只能盯这个通道。
+    pub gathering: mpsc::Receiver<RTCIceGatheringState>,
 }
 
 #[derive(Clone)]
@@ -152,6 +162,7 @@ struct Handler {
     frames: mpsc::Sender<RemoteFrame>,
     relays: mpsc::Sender<Vec<u8>>,
     states: mpsc::Sender<PeerState>,
+    gathering: mpsc::Sender<RTCIceGatheringState>,
 }
 
 #[async_trait::async_trait]
@@ -175,6 +186,11 @@ impl PeerConnectionEventHandler for Handler {
     async fn on_connection_state_change(&self, state: RTCPeerConnectionState) {
         tracing::info!(state = %state, "peer connection state");
         let _ = self.states.try_send(PeerState::from(state));
+    }
+
+    async fn on_ice_gathering_state_change(&self, state: RTCIceGatheringState) {
+        tracing::debug!(state = %state, "ice gathering state");
+        let _ = self.gathering.try_send(state);
     }
 
     async fn on_data_channel(&self, dc: Arc<dyn DataChannel>) {
@@ -293,11 +309,13 @@ impl VoicePeer {
         let (frame_tx, frame_rx) = mpsc::channel(256);
         let (relay_tx, relay_rx) = mpsc::channel::<Vec<u8>>(256);
         let (state_tx, state_rx) = mpsc::channel(16);
+        let (gather_tx, gather_rx) = mpsc::channel(16);
         let handler = Handler {
             candidates: cand_tx,
             frames: frame_tx,
             relays: relay_tx,
             states: state_tx,
+            gathering: gather_tx,
         };
 
         let pc: Arc<dyn PeerConnection> = Arc::new(
@@ -365,6 +383,7 @@ impl VoicePeer {
                 remote_frames: frame_rx,
                 relay_frames: relay_rx,
                 states: state_rx,
+                gathering: gather_rx,
             },
         ))
     }
